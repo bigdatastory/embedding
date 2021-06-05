@@ -6,7 +6,7 @@
         1000,
         50
       ],
-      "tensorPath": "https://raw.githubusercontent.com/.../tensors.tsv",
+      "tensorPath": "https://github.com/bigdatastory/embedding/blob/main/naver_w2v_tensor.tsv",
       "metadataPath": "https://github.com/bigdatastory/embedding/blob/main/naver_w2v_metadata.tsv",
       "sprite": {
         "imagePath": "https://github.com/.../optional.sprite.png",
