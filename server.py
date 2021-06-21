@@ -36,8 +36,8 @@ def Keyboard():
 def Message():
     content = request.get_json()
     print(content)
-    #content = content['userRequest']
-    #content = content['utterance']
+    content = content['userRequest']
+    content = content['utterance']
     #content = content['user_body']
     
     dataSend = {
