@@ -289,3 +289,108 @@ def hp_rank_output(message):
         
     return ["연관검색어\n '{}'".format(search_list), hp_list, recom_list, url_list, img_list]
 
+
+def hp_rank_output_facebook(message):
+    try:
+        ##https://tedboy.github.io/nlps/generated/generated/gensim.models.Word2Vec.most_similar.html
+        # 유사도가 높은 단어 추출
+
+        ##검색어 입력받기(끊어서 명사 혹은 동사 등으로 검색해야 잘검색됨)
+        #input_value = input()
+        input_value = message
+
+        ##tokenize 함수로 명사와 동사 그리고 감탄사만 가져와서 검색하기
+        search_text = tokenize(input_value)
+        #print(search_text)
+
+        # 유사도가 높은 단어 조회
+        key_table = pd.DataFrame(model.wv.most_similar(search_text, topn=10), columns=['key', 'value'])
+        key_table = key_table.set_index(key_table['key'])
+
+        ### 직접 언급한 키워드의 유사도는 3로 고정함(기본 유사도가 99%이기 때문에 이보다 3배 더 고려하기 위함)
+        for x in search_text:
+            key_table.loc[x] = [x, 3]
+
+        search_list = []
+
+        ## 유사어
+        for x in model.wv.most_similar(search_text, topn=10):
+            search_list.append(x[0])
+
+        ## 검색어
+        for x in search_text:
+            search_list.append(x)
+
+        #for hp_nm in hp_all['name']:
+        #    print(hp_nm, [word for word in globals()[hp_nm] if word[0] in search_list] )    
+
+        ## 평점계산
+        socre_table = {}
+
+        for hp_nm in hp_all['name']:
+            token_cnt_list = []
+            for token in globals()[hp_nm]:
+                token_cnt_list.append(token[1])
+
+                ###검색어가 무조건 다 있는 상태에서 순위를 알려줘야 함
+                #ex) 친절한 정형외과 -> 친절하다, 정형외과
+                #    두가지 형태소가 모두 존재하는 병원에서 평점을 계산하가 
+                #    두가지 중 하나라도 없으면 점수를 대폭 낮추거나 0점 처리하기
+                #    두가가 중 하나라도 있으면 (해당 동일갯수 비율 * 0.1) ,  모두 없으면 0점처리
+
+            #print('검색어 형태소 갯수 : ' + str(len(search_text)))
+            match_cnt = 0
+            for x in [word for word in globals()[hp_nm] if word[0] in search_text]:
+                match_cnt += 1
+
+            #print('찾은 형태소 갯수 : ' + str(match_cnt))
+
+            match_wgt = match_cnt / len(search_text)
+            if match_wgt != 1:
+                match_wgt = match_wgt * 0.1
+            #print(match_wgt)
+
+            value_list = []
+            for x in [word for word in globals()[hp_nm] if word[0] in search_list]:
+                value_list.append((key_table.loc[x[0], 'value'].round(2)) * (x[1]))
+
+                                                                                ###형태소 비율로 해서 가중치 고려
+                #value_list.append((key_table.loc[x[0], 'value'].round(2)) * ((x[1]/sum(token_cnt_list)*100)))
+
+            try:
+                socre_table[hp_nm] = ((sum(value_list) * (((naver_reviews_score.loc[hp_nm, 'review_score']+ 5) )/ 10)).round(2)) * match_wgt
+
+
+                                                            ##형태소개수 고려해서 가감
+                #socre_table[hp_nm] = (sum(value_list)  *  (sum(token_cnt_list)/ 50000)  * (((naver_reviews_score.loc[hp_nm, 'review_score']+ 5) )/ 10)).round(2)
+            except:
+                ###review정보에 해당 병원정보가 없어서 평점산출이 안되면 0.5로 고정함..
+                try:
+                    socre_table[hp_nm] = ((sum(value_list) * (0.5)).round(2)) * match_wgt
+                except:
+                    socre_table[hp_nm] = ((sum(value_list) * (0.5))) * match_wgt
+
+
+            socre_table_sort = sorted(socre_table.items(), key=operator.itemgetter(1), reverse=True)
+
+
+        #print('검색어: ' +  input_value)
+        #print('연관검색어: ', search_list)
+        sort_count = 1
+        rank_list = ""
+        for x in socre_table_sort:
+            token_cnt_list = []
+            for token in globals()[x[0]]:
+                token_cnt_list.append(token[1])
+            url_text= hp_all[hp_all['name'] == x[0]]['주소'].values[0]
+            name_dept= hp_all[hp_all['name'] == x[0]]['name_dept'].values[0]
+            
+            if sort_count < 6:
+                rank_list = rank_list + (str(sort_count) + "순위:\n-" +  x[0] + "\n-추천점수: " + str(x[1].round(2)) + "\n-" +  name_dept + "\n-검색어갯수:" + str(sum(token_cnt_list)) + "\n" +  url_text + "\n") 
+            sort_count += 1
+    except:
+        search_list = '관련 검색어가 없습니다'
+        rank_list = '재검색해주시기 바랍니다.'
+        
+    return "연관검색어\n '{}'".format(search_list) + "\n\n검색결과: \n'{}'".format(rank_list)
+
