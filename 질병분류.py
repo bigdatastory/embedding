@@ -98,13 +98,6 @@ disease_m_c = disease_w[(disease_w['나이대']== "공통")]
 # 이는 구글 코랩으로 돌린 버전입니다. 그리고 기본 코드는 SKT Brain의 KoBERT를 그대로 가져왔고, 학습 및 테스트 데이터셋만 따로 준비한 것입니다.
 # SKT Brain github 주소는 다음과 같습니다. https://github.com/SKTBrain/KoBERT
 
-get_ipython().system('pip install mxnet')
-get_ipython().system('pip install gluonnlp pandas tqdm')
-get_ipython().system('pip install sentencepiece')
-get_ipython().system('pip install transformers==3f')
-# 최신 버전으로 설치하면 "Input: must be Tensor, not str" 라는 에러 발생
-get_ipython().system('pip install torch')
-get_ipython().system('pip install git+https://git@github.com/SKTBrain/KoBERT.git@master')
 
 
 import torch
