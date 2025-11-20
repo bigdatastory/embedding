@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>제주 1박 2일 마스터피스 (V10)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- 지도 라이브러리 -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;600;700;800;900&display=swap');
+        
+        :root { --primary: #0F766E; --bg: #F8FAFC; --accent: #F59E0B; }
+        body { font-family: 'Pretendard', sans-serif; background-color: var(--bg); color: #334155; padding-bottom: 100px; margin: 0; -webkit-tap-highlight-color: transparent; }
+        
+        /* 1. 지도 고정 영역 (상단 35%) */
+        #map-wrapper { position: fixed; top: 0; left: 0; right: 0; height: 35vh; z-index: 0; }
+        #map { width: 100%; height: 100%; }
+
+        /* 2. 상단 플로팅 위젯 (날씨 & D-Day) */
+        .floating-header {
+            position: fixed; top: 0; left: 0; width: 100%; z-index: 50;
+            padding: 12px 16px; display: flex; justify-content: space-between; align-items: flex-start;
+            pointer-events: none;
+        }
+        
+        .app-title-box { pointer-events: auto; }
+        .d-day-badge {
+            background: var(--accent); color: white; font-weight: 900; font-size: 0.85rem;
+            padding: 6px 12px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            display: inline-block; text-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 4px;
+        }
+        .app-title { 
+            font-size: 1.2rem; font-weight: 900; color: white; 
+            text-shadow: 0 2px 4px rgba(0,0,0,0.7); 
+        }
+
+        /* 날씨 위젯 (우측 상단) */
+        .weather-card {
+            background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px);
+            padding: 10px 14px; border-radius: 16px; 
+            color: #334155; box-shadow: 0 4px 15px rgba(0,0,0,0.15); 
+            pointer-events: auto; text-align: right; border: 1px solid rgba(255,255,255,0.8);
+            min-width: 140px;
+        }
+        .weather-main { font-size: 1.1rem; font-weight: 800; color: #0F766E; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+        .weather-sub { font-size: 0.75rem; color: #64748B; font-weight: 600; margin-top: 2px; }
+        .forecast-row { font-size: 0.7rem; color: #475569; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #CBD5E1; line-height: 1.4; }
+
+        /* 3. 메인 컨텐츠 (Bottom Sheet) */
+        .content-sheet { 
+            position: relative; z-index: 10; margin-top: 32vh; 
+            background: #F8FAFC; min-height: 70vh;
+            border-top-left-radius: 24px; border-top-right-radius: 24px;
+            box-shadow: 0 -5px 20px rgba(0,0,0,0.1);
+            padding: 24px 16px 100px 16px;
+        }
+
+        /* 요약 정보 바 */
+        .info-bar {
+            background: white; padding: 16px 20px; border-radius: 16px; margin-bottom: 20px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.03); border: 1px solid #E2E8F0;
+        }
+
+        /* 타임라인 스타일 */
+        .timeline-group { margin-bottom: 30px; }
+        .day-header { 
+            position: sticky; top: 0; background: rgba(248,250,252,0.98); 
+            backdrop-filter: blur(5px); z-index: 30; padding: 15px 0;
+            font-size: 1.1rem; font-weight: 800; color: #1E293B; 
+            border-bottom: 2px solid var(--primary); margin-bottom: 20px;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        
+        .timeline-item { display: flex; position: relative; padding-bottom: 24px; }
+        .timeline-item:last-child { padding-bottom: 0; }
+        
+        .tl-time-col { width: 55px; text-align: right; padding-right: 12px; flex-shrink: 0; }
+        .tl-time { font-weight: 800; font-size: 0.95rem; color: #334155; display: block; margin-top: -3px; }
+        
+        .tl-line-col { width: 24px; display: flex; flex-direction: column; align-items: center; position: relative; }
+        .tl-dot { width: 14px; height: 14px; border-radius: 50%; background: #CBD5E1; border: 3px solid white; box-shadow: 0 0 0 1px #CBD5E1; z-index: 2; }
+        .tl-line { width: 2px; background: #E2E8F0; flex-grow: 1; margin-top: 4px; margin-bottom: 4px; }
+        
+        .tl-content { flex: 1; }
+        .place-card {
+            background: white; border: 1px solid #E2E8F0; border-radius: 16px; 
+            padding: 16px; box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+            position: relative; transition: all 0.2s;
+        }
+        .place-card:active { transform: scale(0.98); background: #F8FAFC; }
+        
+        /* 현재 위치 하이라이트 (강조) */
+        .active-now .tl-dot { background: #EF4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.3); transform: scale(1.3); }
+        .active-now .tl-time { color: #EF4444; }
+        .active-now .place-card { border: 2px solid #EF4444; background: #FEF2F2; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.15); }
+        .active-now .place-card::before {
+            content: '진행중'; position: absolute; top: 0; right: 0;
+            background: #EF4444; color: white; font-size: 0.65rem; font-weight: 800;
+            padding: 3px 10px; border-bottom-left-radius: 10px; z-index: 5;
+        }
+        
+        .place-title { font-weight: 800; font-size: 1.05rem; color: #1E293B; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
+        .place-desc { font-size: 0.9rem; color: #475569; margin-bottom: 8px; line-height: 1.5; }
+        .expert-tip { background: #EFF6FF; border-left: 3px solid #3B82F6; padding: 8px 12px; font-size: 0.85rem; color: #1E40AF; border-radius: 0 8px 8px 0; margin-top: 8px; line-height: 1.5; }
+        
+        /* 이동 정보 */
+        .move-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 0.75rem; font-weight: 700; color: #64748B;
+            background: #F1F5F9; padding: 4px 10px; border-radius: 20px;
+            border: 1px solid #E2E8F0; margin: 4px 0 12px 79px;
+        }
+
+        /* 4. 상세 정보 카드 */
+        .info-card { background: white; border-radius: 16px; padding: 20px; margin-bottom: 16px; border: 1px solid #E2E8F0; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+        .tag { display: inline-block; font-size: 0.7rem; font-weight: 800; padding: 4px 8px; border-radius: 6px; margin-bottom: 8px; }
+        .tag-meal { background: #FFF7ED; color: #C2410C; }
+        .tag-cafe { background: #FAF5FF; color: #7E22CE; }
+        .tag-tour { background: #F0FDF4; color: #15803D; }
+        
+        /* 스마트 버튼 */
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+        .btn-action { text-align: center; padding: 12px; border-radius: 10px; font-size: 0.85rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; transition: all 0.1s; }
+        .btn-green { background: #03C75A; color: white; border: 1px solid #02b351; }
+        .btn-outline { border: 1px solid #CBD5E1; color: #334155; background: white; }
+        .btn-action:active { transform: scale(0.96); }
+        
+        /* 길찾기 버튼 */
+        .btn-navi { font-size: 0.75rem; background: #0F766E; color: white; padding: 5px 10px; border-radius: 6px; text-decoration: none; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
+        /* 꿀팁 아코디언 */
+        .guide-card { background: white; border: 1px solid #E2E8F0; border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+        .guide-header { padding: 16px; background: white; display: flex; align-items: center; justify-content: space-between; font-weight: 800; color: #1E293B; cursor: pointer; border-left: 6px solid var(--primary); }
+        .guide-body { padding: 0 16px 16px 16px; font-size: 0.9rem; color: #475569; line-height: 1.7; display: none; border-top: 1px dashed #E2E8F0; margin-top: -8px; padding-top: 16px; background: #FAFAFA; }
+        .guide-body.open { display: block; }
+        .guide-body ul { list-style: none; padding: 0; margin: 0; margin-top: 12px; }
+        .guide-body li { margin-bottom: 10px; position: relative; padding-left: 14px; }
+        .guide-body li::before { content: "•"; position: absolute; left: 0; color: var(--primary); font-weight: bold; }
+        .guide-icon { font-size: 1.2rem; color: var(--primary); margin-right: 10px; width: 24px; text-align: center; }
+
+        /* 경비 테이블 */
+        .cost-table { width: 100%; font-size: 0.9rem; margin-bottom: 12px; }
+        .cost-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed #E2E8F0; font-size: 0.9rem; }
+        .cost-row:last-child { border-bottom: none; }
+        .cost-total { background: #F0FDFA; padding: 16px; border-radius: 12px; display: flex; justify-content: space-between; font-weight: 900; color: #0F766E; margin-top: 16px; font-size: 1.1rem; }
+        
+        .check-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: white; border-radius: 10px; margin-bottom: 8px; cursor: pointer; border: 1px solid #E2E8F0; transition: all 0.2s; }
+        .check-item.checked { opacity: 0.5; background: #F1F5F9; }
+        .check-item.checked span { text-decoration: line-through; color: #94A3B8; }
+        .check-item i { color: #CBD5E1; font-size: 1.2rem; }
+        .check-item.checked i { color: var(--primary); }
+
+        /* 5. 하단 탭바 */
+        .nav-bar { 
+            position: fixed; bottom: 0; left: 0; width: 100%; 
+            background: rgba(255,255,255,0.98); border-top: 1px solid #E2E8F0; 
+            display: flex; justify-content: space-around; padding: 10px 0 24px 0; 
+            z-index: 100; box-shadow: 0 -4px 10px rgba(0,0,0,0.05); 
+        }
+        .nav-item { text-align: center; font-size: 0.7rem; color: #94A3B8; width: 25%; cursor: pointer; }
+        .nav-item i { font-size: 1.4rem; margin-bottom: 4px; display: block; }
+        .nav-item.active { color: var(--primary); font-weight: 800; color: var(--primary); }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+
+    <!-- 1. 지도 및 상단 고정 위젯 -->
+    <div id="map-container">
+        <!-- 지도 -->
+ 	<div id="map-wrapper">
+    	     <div id="map"></div>
+   	</div>
+        <div class="floating-header">
+            <div class="app-title-box">
+                <div id="d-day" class="d-day-badge">D-DAY</div>
+                <div class="app-title">제주 마스터 V10</div>
+            </div>
+            <!-- 날씨 위젯 -->
+            <div id="weather-widget" class="weather-card">
+                <div class="weather-row">
+                    <span id="weather-icon"><i class="fas fa-sync fa-spin"></i></span>
+                    <span id="weather-temp" class="weather-main">로딩중</span>
+                </div>
+                <div id="weather-detail" class="weather-sub">데이터 수신중...</div>
+                <div class="forecast-row">
+                    <div>27(목): <i class="fas fa-sun text-orange-400"></i> 12°/18°</div>
+                    <div>28(금): <i class="fas fa-cloud text-slate-400"></i> 11°/17°</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 메인 컨텐츠 (Bottom Sheet) -->
+    <div class="content-sheet">
+        <!-- 요약 정보 바 -->
+        <div class="info-bar">
+            <div>
+                <span class="block text-xs text-slate-400 font-bold uppercase tracking-wider">Current Status</span>
+                <div class="text-lg font-black text-slate-800">여행 진행 상황</div>
+            </div>
+            <div class="text-right">
+                <div class="text-2xl font-black text-slate-800 font-mono" id="clock">00:00</div>
+                <div class="text-xs text-slate-500 font-bold" id="date">2025.11.20 (목)</div>
+            </div>
+        </div>
+
+        <!-- 탭 컨텐츠 -->
+        <div id="tab-content"></div>
+    </div>
+
+    <!-- 3. 하단 탭 -->
+    <div class="nav-bar">
+        <div class="nav-item active" onclick="switchTab('timeline', this)">
+            <i class="fas fa-stream"></i> 타임라인
+        </div>
+        <div class="nav-item" onclick="switchTab('food', this)">
+            <i class="fas fa-map-marked-alt"></i> 플레이스
+        </div>
+        <div class="nav-item" onclick="switchTab('tips', this)">
+            <i class="fas fa-book-open"></i> 꿀팁백과
+        </div>
+        <div class="nav-item" onclick="switchTab('cost', this)">
+            <i class="fas fa-file-invoice-dollar"></i> 경비/체크
+        </div>
+    </div>
+
+    <script>
+        // =========================================
+        // 1. 마스터 데이터 (Master Data)
+        // =========================================
+        const SCHEDULE = [
+            // Day 0
+            { day: 0, time: "D-1", title: "여행 전날 체크", desc: "신분증(전원), 면허증, 테이블링 앱 카드등록 확인", lat: 36.35, lng: 127.38, type: "prep", dist: "-", dur: "-" , detail: "테이블링 페이 등록 안하면 내일 연돈 예약 실패함!" },
+            // Day 1
+            { day: 1, time: "04:50", title: "대전 집 출발", desc: "가스 잠금 확인. 청주공항까지 1시간.", lat: 36.3504, lng: 127.4370, type: "move", navi: "청주국제공항", dist: "45km", dur: "50분", detail: "제2주차장 위치 미리 파악" },
+            { day: 1, time: "05:40", title: "청주공항 도착", desc: "주차 후 2층 이동. 바이오 등록줄 이용.", lat: 36.7166, lng: 127.4991, type: "fixed", dist: "-", dur: "-" , detail: "신분증 미리 꺼내두기" },
+            { day: 1, time: "06:10", title: "수속 마감", desc: "이스타항공 탑승. 수속마감  ZE711 (06:50 출발). 늦으면 탑승 불가.", lat: 36.7166, lng: 127.4991, type: "fixed", dist: "-", dur: "-", detail: "기내에서 꿀잠 자기" },
+            { day: 1, time: "08:00", title: "제주공항 & 쏘카", desc: "5번 게이트 건너편 렌터카하우스 **[5구역 12번]**", lat: 33.5104, lng: 126.4913, type: "move", navi: "제주국제공항렌터카하우스", dist: "도보", dur: "10분" , detail: "차량 외관/휠 동영상 촬영 필수" },
+            { day: 1, time: "09:00", title: "자매국수 (아침)", desc: "고기국수. 캐치테이블 대기 확인 필수.", lat: 33.5050, lng: 126.4950, type: "meal", navi: "자매국수본점", dist: "5km", dur: "15분", detail: "캐치테이블로 미리 줄서기 확인" },
+            { day: 1, time: "10:30", title: "클랭블루 (카페)", desc: "신창풍차해안도로 드라이브 & 커피.", lat: 33.3450, lng: 126.1700, type: "cafe", navi: "클랭블루", dist: "35km", dur: "50분" , detail: "2층 통창 인생샷 (역광 주의)" },
+            { day: 1, time: "12:30", title: "춘심이네 (점심)", desc: "통갈치구이 2인 세트. 직원이 뼈 발라줌.", lat: 33.2500, lng: 126.3300, type: "meal", navi: "춘심이네본점", dist: "14km", dur: "25분", detail: "영수증 지참시 2층 초콜릿 무료" },
+            { day: 1, time: "14:00", title: "원앤온리 (카페)", desc: "산방산 배산임수 뷰. 야외 테라스 추천.", lat: 33.2392, lng: 126.3195, type: "cafe", navi: "원앤온리", dist: "5km", dur: "10분", detail: "사람 많으면 테이크아웃 후 해변 산책" },
+            { day: 1, time: "15:00", title: "송악산 둘레길", desc: "절벽 뷰 트레킹. 소요 1시간. 경치 예술.", lat: 33.1994, lng: 126.2908, type: "tour", navi: "송악산주차장", dist: "6km", dur: "12분", detail: "바람 강함! 바람막이 필수 착용" },
+            { day: 1, time: "16:20", title: "카멜리아힐", desc: "11월 동백꽃 축제. 일몰 전 사진 촬영.", lat: 33.2872, lng: 126.3705, type: "tour", navi: "카멜리아힐", dist: "15km", dur: "25분", detail: "흰색/밝은색 옷이 사진 잘 나옴" },
+            { day: 1, time: "17:40", title: "더본호텔 체크인", desc: "체크인 후 **10시 연돈 예약 성공 여부** 확인.", lat: 33.2595, lng: 126.4061, type: "fixed", navi: "호텔더본제주", dist: "8km", dur: "15분", detail: "웰컴쿠폰북(빽다방 빵) 꼭 챙기기" },
+            { day: 1, time: "19:00", title: "연돈 (저녁)", desc: "오전 10시 현장 예약 성공 시 식사. 실패 시 다른 곳.", lat: 33.2595, lng: 126.4061, type: "meal", navi: "연돈", dist: "도보", dur: "1분", detail: "실패시: 바로 옆 연돈볼카츠 포장 치맥" },
+
+            // Day 2
+            { day: 2, time: "07:00", title: "탐모라 (조식)", desc: "호텔 지하 1층. 06:50 오픈런 추천.", lat: 33.2595, lng: 126.4061, type: "meal", dist: "-", dur: "-" , detail: "쌀국수 & 수제햄 공략" },
+            { day: 2, time: "09:00", title: "휴애리", desc: "동백 & 흑돼지 쇼(10시). 감귤 따기.", lat: 33.2830, lng: 126.6330, type: "tour", navi: "휴애리자연생활공원", dist: "25km", dur: "40분", detail: "흑돼지 쇼 시간 맞춰 이동" },
+            { day: 2, time: "10:50", title: "귤꽃다락 (카페)", desc: "돌창고 감성 카페. 귤밭 포토존.", lat: 33.2685, lng: 126.6300, type: "cafe", navi: "귤꽃다락", dist: "5km", dur: "10분", detail: "본관 거울샷 & 별관이 조용함" },
+            { day: 2, time: "12:00", title: "용눈이오름", desc: "완만한 경사. 정상 뷰 탁월.", lat: 33.4340, lng: 126.8430, type: "tour", navi: "용눈이오름주차장", dist: "23km", dur: "35분" , detail: "정상 바람 주의" },
+            { day: 2, time: "13:00", title: "낭뜰에쉼팡 (점심)", desc: "속 편한 쌈밥 정식.", lat: 33.4500, lng: 126.6750, type: "meal", navi: "낭뜰에쉼팡", dist: "12km", dur: "20분", detail: "고등어구이 추가 추천" },
+            { day: 2, time: "14:10", title: "에코랜드", desc: "기차 타고 곶자왈 숲 힐링.", lat: 33.4550, lng: 126.6700, type: "tour", navi: "에코랜드테마파크", dist: "3km", dur: "5분", detail: "레이크사이드역 풍차 배경 촬영" },
+            { day: 2, time: "15:50", title: "카페 델문도", desc: "함덕 바다 위 카페.", lat: 33.5431, lng: 126.6690, type: "cafe", navi: "카페델문도", dist: "10km", dur: "15분", detail: "야외 테라스 자리 선점 필수" },
+            { day: 2, time: "16:40", title: "쏘카 반납", desc: "★17:00 반납 필수. 주유 확인.", lat: 33.5080, lng: 126.4930, type: "fixed", navi: "쏘카스테이션제주", dist: "22km", dur: "40분", detail: "금요일 퇴근길 정체 고려" },
+            { day: 2, time: "17:30", title: "공항 저녁/쇼핑", desc: "면세점 오메기떡/마음샌드 픽업.", lat: 33.5104, lng: 126.4913, type: "meal", dist: "셔틀", dur: "15분", detail: "오메기떡/마음샌드 픽업"},
+            { day: 2, time: "19:05", title: "청주행 출발", desc: "TW836 (수속 18:25 마감).", lat: 33.5104, lng: 126.4913, type: "fixed", dist: "-", dur: "-" , detail: "탑승구 번호 재확인" },
+            { day: 2, time: "20:15", title: "청주공항 도착", desc: "주차 정산 후 귀가.", lat: 36.7166, lng: 127.4991, type: "move", dist: "-", dur: "1시간 10분", detail: "안전 운전 귀가" },
+            { day: 2, time: "21:20", title: "대전 집 도착", desc: "안전 귀가 완료.", lat: 36.3504, lng: 127.4370, type: "move", navi: "대전복합터미널", dist: "45km", dur: "60분", detail: "짐 정리" }
+        ];
+
+        const PLACES = [
+            { name: "연돈", type: "meal", main: "등심(1.1만)/치즈(1.5만)", desc: "국내 최고 돈까스 성지. ★당일 오전 10시 현장 키오스크 등록★ 필수.", tips: ["투숙객 꿀팁: 아침 9:30쯤 슬리퍼 신고 나가서 줄 서 있다가 등록하고 오세요.", "카레(5천원)는 선택이 아닌 필수. 밥 비벼 먹으면 극락.", "실패시: 바로 옆 '연돈볼카츠' 포장해서 호텔방 맥주 파티."] },
+            { name: "자매국수", type: "meal", main: "고기국수(9,000원)", desc: "공항 근처 1티어. 진한 사골 육수와 치자면.", tips: ["'캐치테이블' 앱으로 공항 도착하자마자 대기 등록하세요.", "비빔국수+돔베고기(소) 조합이 진리."] },
+            { name: "클랭블루", type: "cafe", main: "우도땅콩라떼(8.0)", desc: "풍차해안도로 뷰 갤러리. 2층 통창이 시그니처.", tips: ["2층 중앙 통창은 포토존(좌석X)", "일몰 시간대 역광 실루엣 사진 명소."] },
+            { name: "춘심이네 본점", type: "meal", main: "통갈치구이 2인(8.9만)", desc: "압도적 크기. 직원이 숟가락으로 뼈를 완벽 분해해줌.", tips: ["식사 후 영수증 지참 시 2층 카페 초콜릿 무료.", "갈치조림은 뼈가 없어 아이들도 먹기 편함."] },
+            { name: "더본호텔 탐모라", type: "meal", main: "호텔 뷔페(1.2만/투숙객)", desc: "백종원 호텔다운 가성비 끝판왕 조식.", tips: ["07:00 오픈런 필수. 07:30 넘어가면 대기 줄 깁니다.", "쌀국수 코너와 수제 햄 코너는 꼭 공략하세요."] },
+            { name: "낭뜰에쉼팡", type: "meal", main: "낭뜰정식(14,000원)", desc: "현지인이 찾는 건강 쌈밥집. 자극적이지 않은 맛.", tips: ["고등어구이(7천원) 추가하면 임금님 수라상 안 부러움.", "웨이팅 기계 없음. 카운터에서 번호표 받으세요."] },
+            { name: "카페 델문도", type: "cafe", main: "베이커리, 커피", desc: "한국의 몰디브 함덕 바다 바로 위.", tips: ["주문 전 야외 테라스 자리 확보.", "마늘바게트 추천."] },
+            { name: "송악산 둘레길", type: "tour", main: "무료 (소요 1h 20m)", desc: "제주 서남쪽 비경. 산방산, 형제섬, 마라도가 다 보임.", tips: ["바람이 정말 많이 붑니다. 모자 날아감 주의.", "입구 스타벅스에서 음료 사서 산책하면 꿀맛."] },
+            { name: "카멜리아힐", type: "tour", main: "성인 10,000원", desc: "동양 최대 동백 수목원. 11월은 동백 시즌.", tips: ["흰색/아이보리색 옷 추천 (사진 잘 나옴)", "네이버 예매 시 할인 (당일 사용 가능 확인 필수)."] },
+            { name: "휴애리", type: "tour", main: "성인 13,000원", desc: "계절 꽃 축제와 흑돼지 쇼.", tips: ["매시 정각 흑돼지 쇼 관람", "감귤 따기 체험(별도) 봉투 꽉 채우기"] },
+            { name: "에코랜드", type: "tour", main: "성인 16,000원", desc: "곶자왈 숲속 기차 여행.", tips: ["메인역→레이크사이드→피크닉가든 순 이동", "막차 시간 확인"] }
+        ];
+
+        const GUIDES = [
+            { icon:"fa-check-circle", color:"text-red-600", title:"🚨 연돈 예약 방식 변경 (필독)", content: "<ul><li><strong>현장 접수:</strong> 전날 앱 예약은 폐지되었습니다. 무조건 <strong>'당일 오전 10시 매장 앞 캐치테이블 키오스크'</strong> 현장 등록만 가능합니다.</li><li><strong>투숙객 전략:</strong> 호텔이 바로 옆이니, 아침 9시 30분쯤 슬리퍼 신고 나가서 줄 서 있다가 등록하고, 다시 방에 와서 쉬거나 조식을 드세요.</li><li><strong>입장 알림:</strong> 카톡으로 '지금 입장하세요' 알림이 오면 5분 내로 가야 합니다. 저녁 식사 시간을 대략 예측하고 근처(호텔 방)에 계시는 게 안전합니다.</li></ul>" },
+            { icon:"fa-car", color:"text-green-600", title:"🚗 렌터카 & 운전 팁", content: "<ul><li><strong>쏘카 셔틀:</strong> 공항 1층 5번 게이트 건너편 '렌터카하우스' <strong>5구역 12번</strong>입니다. (20분 간격 운행)</li><li><strong>슈퍼 자차:</strong> 일반 완전자차는 타이어 펑크, 휠 긁힘, 차 키 분실, 긴급출동 서비스를 보장하지 않는 경우가 많습니다. 몇 만원 아끼려다 큰돈 나갑니다. 마음 편하게 <strong>'슈퍼 자차(한도 무제한)'</strong>를 강력 추천합니다.</li><li><strong>회전교차로 룰:</strong> 제주는 신호등 없는 회전교차로가 많습니다. <strong>'이미 돌고 있는 회전 차량이 무조건 우선'</strong>입니다. 진입하려는 차는 무조건 멈추고 양보해야 합니다. 나갈 때는 우측 깜빡이를 켜주세요.</li><li><strong>반납 시간 계산:</strong> 17:00 반납이면, 16:50에 쏘카존 도착 -> 셔틀 탑승 -> 공항 도착 17:20 정도입니다. 금요일 저녁 제주시내(노형오거리)는 퇴근길 정체가 심하므로, 네비 예상 시간보다 20~30분 여유 있게 출발하세요.</li></ul>" },
+            { icon:"fa-plane", color:"text-blue-600", title:"✈️ 공항 이용: 시간 절약 비법", content: "<ul><li><strong>바이오 등록 (프리패스):</strong> 청주공항 2층 등록대에서 신분증과 함께 손바닥 정맥을 등록하세요. 제주 갈 때, 올 때 신분증 꺼낼 필요 없이 전용 게이트로 1초 만에 통과합니다. 줄 설 필요가 없습니다.</li><li><strong>모바일 체크인 전쟁:</strong> 출발 24시간 전 카톡 알림 오면 즉시 접속하세요! <strong>앞쪽 좌석(1~5열)</strong>을 선점해야 제주 도착 후 비행기에서 빨리 내려 렌터카 셔틀버스까지 1등으로 뜁니다. 짐 찾을 게 없다면 더 빠릅니다.</li><li><strong>기내 반입 금지품:</strong> 보조배터리, 휴대용 선풍기, 전자담배, 라이터는 위탁수하물(부치는 짐) 절대 금지! <strong>무조건 기내 휴대 가방</strong>에 넣으세요. (이거 때문에 짐 검사 걸려서 방송 나오는 사람 정말 많습니다)</li></ul>" },
+            { icon:"fa-camera", color:"text-pink-600", title:"📸 11월 제주 날씨 & 옷차림", content: "<ul><li><strong>바람과의 전쟁:</strong> 기온은 15도로 따뜻해 보여도 바람 불면 체감 5도입니다. 두꺼운 패딩보다는 <strong>'경량 패딩 조끼'</strong>나 '바람막이'를 여러 겹 입는 게 활동하기 좋습니다.</li><li><strong>인생샷 색감 매치:</strong> <br>- 카멜리아힐(동백꽃): 붉은 꽃과 대비되는 <strong>흰색, 아이보리색</strong> 니트나 코트.<br>- 귤밭/오름: <strong>베이지색, 연한 갈색, 카키색</strong> 계열이 가을/겨울 제주 감성과 찰떡입니다.<br>- 바다: 쨍한 <strong>파란색</strong>이나 원색 계열이 사진 잘 나옵니다.</li><li><strong>삼각대 주의:</strong> 다이소 5천원짜리 가벼운 삼각대는 제주 바람에 100% 넘어집니다. 튼튼한 걸 챙기거나 가방을 걸어서 무게중심을 낮추세요.</li></ul>" },
+            { icon:"fa-gift", color:"text-purple-600", title:"🎁 쇼핑 & 먹거리: 호갱 탈출", content: "<ul><li><strong>초콜릿의 진실:</strong> 시장에서 'OO초콜릿' 10박스 만원 하는 건 코코아 함량이 낮은 가짜 초콜릿(준초콜릿)입니다. 돈 좀 더 주더라도 <strong>'제주 리얼 타르트'</strong>나 <strong>'과즐(감귤한과)'</strong>을 사세요. 회사 선물용으로 반응 훨씬 좋습니다.</li><li><strong>오메기떡 구매:</strong> 낱개 포장된 <strong>'냉동 오메기떡'</strong>을 사야 집에 가서도 해동해 먹기 편합니다. 공항 수령 가능한 떡집(진아떡집, 오복떡 등)에 미리 전화 예약하면 출국장 앞에서 바로 받을 수 있습니다.</li><li><strong>마음샌드:</strong> 파리바게트 앱으로 <strong>3일 전 예약</strong> 가능합니다. 현장 줄 서지 말고 제주공항 렌터카하우스점에서 픽업하세요.</li><li><strong>회 포장 꿀팁:</strong> 동문시장 야시장은 사람이 너무 많아 기 빨립니다. 숙소(더본호텔) 근처 <strong>'중문 하나로마트' 회 코너</strong>가 가성비와 신선도 모두 훌륭합니다.</li></ul>" },
+            { icon:"fa-kit-medical", color:"text-red-500", title:"🏥 비상 상황 대처", content: "<ul><li><strong>약국:</strong> 시내 벗어나면 약국 찾기 힘듭니다. 소화제, 진통제, 밴드 미리 챙기세요.</li><li><strong>응급실:</strong> 서귀포 의료원(남쪽), 제주대학교병원/한라병원(북쪽).</li><li><strong>콜택시:</strong> 카카오T 안 잡힐 때 '제주 콜택시(064-711-8282)' 이용.</li></ul>" },
+            { icon:"fa-road", color:"text-gray-600", title:"⚠️ 야간 운전 주의", content: "<ul><li><strong>중산간 도로:</strong> 1100도로나 516도로는 밤에 가로등이 없고 안개가 자주 낍니다. 초보운전자는 야간에 해안도로나 일주도로를 이용하세요.</li><li><strong>로드킬:</strong> 밤에는 노루나 고라니가 튀어나옵니다. 규정 속도 준수 필수.</li></ul>" },
+            { icon:"fa-umbrella", color:"text-blue-400", title:"☔ 비 올 때 플랜 B", content: "<ul><li><strong>실내 추천:</strong> 아르떼뮤지엄(서쪽), 빛의 벙커(동쪽), 아쿠아플라넷(동쪽), 여미지식물원(중문).</li><li><strong>숲길:</strong> 비자림이나 사려니숲길은 비 오는 날 운치가 더 좋습니다. (우비 필수)</li></ul>" }
+        ];
+
+        const COST_DATA = [
+            { cat: "사전 결제", items: [{n:'항공료 (왕복 3인)', v: 505200}, {n:'숙박 (더본 1박)', v: 166000}, {n:'렌터카 (EV3/자차)', v: 157610}] },
+            { cat: "현장 식비 (예상)", items: [{n:'자매국수 (3인)', v: 30000}, {n:'춘심이네 (2인세트+@)', v: 110000}, {n:'연돈 (돈까스+카레)', v: 60000}, {n:'탐모라 조식 (할인)', v: 36000}, {n:'낭뜰에쉼팡', v: 50000}, {n:'공항 저녁', v: 40000}, {n:'카페 4곳', v: 120000}] },
+            { cat: "입장료/기타", items: [{n:'카멜리아힐 (3인)', v: 30000}, {n:'휴애리 (3인)', v: 39000}, {n:'에코랜드 (3인)', v: 48000}, {n:'주유/잡비', v: 30000}] }
+        ];
+
+        // --- 로직 ---
+        let map, currentTab = 'timeline';
+
+        // 날씨 API (ID 수정 및 안정화)
+        async function fetchWeather() {
+            try {
+                const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=33.49&longitude=126.53&current_weather=true&hourly=temperature_2m,weathercode,windspeed_10m&timezone=Asia%2FTokyo');
+                const data = await res.json();
+                const cur = data.current_weather;
+                
+                let icon = '<i class="fas fa-sun text-yellow-400"></i>';
+                let status = "맑음";
+                if(cur.weathercode > 3) { icon = '<i class="fas fa-cloud text-slate-200"></i>'; status = "흐림"; }
+                if(cur.weathercode > 50) { icon = '<i class="fas fa-umbrella text-blue-300"></i>'; status = "비"; }
+
+                const el = document.getElementById('weather-widget');
+                if(el) {
+                    el.innerHTML = `
+                        <div class="weather-main">${icon} ${Math.round(cur.temperature)}°C</div>
+                        <div class="weather-sub">${status}, 바람 ${cur.windspeed}m/s</div>
+                        <div class="forecast-row">
+                            <div>27(목): 🌤️ 13°/19°</div>
+                            <div>28(금): ☁️ 12°/17°</div>
+                        </div>
+                    `;
+                }
+            } catch(e) {
+                console.log("Weather Error");
+            }
+        }
+
+        // 시계 & D-Day
+        function updateClock() {
+            const now = new Date();
+            
+            // 시뮬레이션 모드 (오늘을 2025.11.20으로 가정)
+            const isSimul = true; 
+
+            // D-DAY 계산
+            const tripDate = new Date('2025-11-27T00:00:00');
+            const diff = Math.ceil((tripDate - now) / (1000 * 60 * 60 * 24));
+            
+            let dDayText = diff > 0 ? `D-${diff}` : (diff === 0 ? "Day 1" : (diff === -1 ? "Day 2" : "여행종료"));
+
+            const dDayEl = document.getElementById('d-day');
+            if(dDayEl) dDayEl.innerText = dDayText;
+            
+            const clockEl = document.getElementById('clock');
+            if(clockEl) clockEl.innerText = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            
+            const dateEl = document.getElementById('date');
+            if(dateEl) dateEl.innerText = `${now.getMonth()+1}.${now.getDate()} (${['일','월','화','수','목','금','토'][now.getDay()]})`;
+            
+            if(currentTab === 'timeline') highlightTimeline(now, diff);
+        }
+
+        function highlightTimeline(now, diff) {
+            const curTime = now.getHours() * 100 + now.getMinutes();
+            // 데모: 오늘이 여행날짜가 아니면 Day 1으로 가정하고 하이라이트
+            // 실제 사용 시에는 diff === 0 (Day1), diff === -1 (Day2) 체크
+            let targetDay = (diff === 0) ? 1 : ((diff === -1) ? 2 : 1); 
+
+            document.querySelectorAll('.timeline-row').forEach(row => {
+                row.classList.remove('active-now');
+                const idParts = row.id.split('-');
+                if(idParts.length < 3) return;
+                const d = parseInt(idParts[1]);
+                const t = parseInt(idParts[2]);
+                
+                if (d === targetDay && curTime >= t && curTime < t + 100) {
+                    row.classList.add('active-now');
+                    // 스크롤 자동 이동 (선택적)
+                    // row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            });
+        }
+
+        function flyTo(lat, lng) {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            map.flyTo([lat, lng], 14, { duration: 1.5 });
+        }
+        
+        function openNavi(name) {
+            if(!name) return;
+            //const url = `https://m.map.naver.com/search2/search.naver?query=${encodeURIComponent(name)}`;
+ 	    const isMobile = /Android|iPhone/i.test(navigator.userAgent);
+            const url = isMobile ? `https://m.map.naver.com/search2/search.naver?query=${name}` : `https://map.naver.com/v5/search/${name}`;
+
+            window.open(url, '_blank');
+        }
+
+        function switchTab(tab, el) {
+            currentTab = tab;
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            el.classList.add('active');
+            const con = document.getElementById('tab-content');
+            con.innerHTML = '';
+            
+            if(tab === 'timeline') renderTimeline(con);
+            if(tab === 'food') renderFood(con);
+            if(tab === 'tips') renderGuides(con);
+            if(tab === 'cost') renderCost(con);
+            window.scrollTo(0, 0);
+        }
+
+        // --- 렌더링 함수 ---
+        function renderTimeline(container) {
+            let html = `<div class="pb-4">`;
+            [0, 1, 2].forEach(day => {
+                if(day === 0) {
+                    html += `<div class="timeline-group"><div class="day-header" style="border-color:#94A3B8; color:#64748B;">Day 0 (준비)</div>`;
+                } else {
+                    html += `<div class="timeline-group"><div class="day-header">Day ${day} ${day===1?'(서쪽)':'(동쪽)'}</div>`;
+                }
+                
+                const items = SCHEDULE.filter(s => s.day === day);
+                items.forEach((item) => {
+                    // Time ID generation
+                    let tVal = 9999;
+                    if(item.time && item.time.includes(':')) {
+                        tVal = parseInt(item.time.replace(':',''));
+                    }
+                    
+                    let rightInfo = '';
+                    if(item.dist !== '-' && item.dist) {
+                        rightInfo = `<div class="move-badge"><i class="fas fa-car text-xs"></i> ${item.dist} / ${item.dur}</div>`;
+                    }
+
+                    html += `
+                        ${rightInfo}
+                        <div class="timeline-item" id="t-${day}-${tVal}" onclick="flyTo(${item.lat}, ${item.lng})">
+                            <div class="tl-time-col"><span class="tl-time">${item.time}</span></div>
+                            <div class="tl-line-col"><div class="tl-dot"></div><div class="tl-line"></div></div>
+                            <div class="tl-content">
+                                <div class="place-card">
+                                    <div class="place-title">
+                                        <span>${item.title}</span>
+                                        ${item.navi ? `<button class="btn-navi" onclick="openNavi('${item.navi}'); event.stopPropagation();">↗ 길찾기</button>` : ''}
+                                    </div>
+                                    <div class="place-desc">${item.desc}</div>
+                                    ${item.detail ? `<div class="expert-tip"><strong>Tip:</strong> ${item.detail}</div>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += `</div>`;
+            });
+            html += `</div>`;
+            container.innerHTML = html;
+            updateClock();
+        }
+
+        function renderFood(container) {
+            let html = `<div class="pb-4 space-y-4">`;
+            PLACES.forEach(p => {
+                const isTour = p.type === 'tour';
+                const btn1 = isTour ? '관람 후기' : '솔직 후기';
+                const btn2 = isTour ? '입장료/시간' : '메뉴판 보기';
+                const url1 = `https://search.naver.com/search.naver?where=blog&query=${encodeURIComponent("제주 "+p.name+" 솔직후기")}`;
+                const url2 = `https://m.search.naver.com/search.naver?query=${encodeURIComponent("제주 "+p.name+" 메뉴")}`;
+                const tagClass = isTour ? 'tag-tour' : (p.type === 'cafe' ? 'tag-cafe' : 'tag-food');
+                const typeName = isTour ? '관광지' : (p.type === 'cafe' ? '카페' : '맛집');
+                const mainLabel = isTour ? '관람 포인트' : '대표 메뉴';
+                
+                html += `
+                    <div class="info-card">
+                        <div class="detail-header">
+                            <div><span class="tag ${tagClass}">${typeName}</span><h3 class="text-xl font-black text-slate-800">${p.name}</h3></div>
+                        </div>
+                        <div class="text-sm mb-3"><span class="font-bold text-teal-700">★ ${mainLabel}:</span> ${p.main}</div>
+                        <p class="text-sm text-slate-600 mb-4 bg-slate-50 p-3 rounded-lg">${p.desc}</p>
+                        <div class="mb-4">
+                            <div class="text-xs font-bold text-amber-600 mb-1"><i class="fas fa-star"></i> 전문가 Tip</div>
+                            <ul class="list-disc pl-4 text-xs text-slate-500 space-y-1">${p.tips.map(t => `<li>${t}</li>`).join('')}</ul>
+                        </div>
+                        <div class="btn-group">
+                            <a href="${url1}" target="_blank" class="btn-action btn-outline"><i class="fas fa-search"></i> ${btn1}</a>
+                            <a href="${url2}" target="_blank" class="btn-action btn-green"><i class="fas fa-book-open"></i> ${btn2}</a>
+                        </div>
+                    </div>`;
+            });
+            html += `</div>`;
+            container.innerHTML = html;
+        }
+
+        function renderGuides(container) {
+            let html = `<div class="space-y-4 pb-4">`;
+            GUIDES.forEach((g, idx) => {
+                html += `
+                    <div class="guide-card">
+                        <div class="guide-header" onclick="document.getElementById('g-${idx}').classList.toggle('open')">
+                            <div class="flex items-center gap-3"><div class="guide-icon"><i class="fas ${g.icon}"></i></div><span>${g.title}</span></div>
+                            <i class="fas fa-chevron-down text-slate-300"></i>
+                        </div>
+                        <div id="g-${idx}" class="guide-body open">${g.content}</div>
+                    </div>
+                `;
+            });
+            html += `</div>`;
+            container.innerHTML = html;
+        }
+
+        function renderCost(container) {
+            const fmt = n => n.toLocaleString();
+            let total = 0;
+            let html = `<div class="space-y-6 pb-4"><div class="info-card"><h3 class="text-lg font-black text-teal-800 mb-4">💰 3인 가족 상세 견적</h3>`;
+            
+            COST_DATA.forEach(group => {
+                let subTotal = 0;
+                html += `<div class="mb-4"><div class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider border-b pb-1">${group.cat}</div>`;
+                group.items.forEach(item => {
+                    subTotal += item.v;
+                    html += `<div class="cost-row"><span>${item.n}</span><span class="font-bold">${fmt(item.v)}</span></div>`;
+                });
+                html += `<div class="text-right text-xs font-bold text-slate-500 mt-1">소계: ${fmt(subTotal)}원</div></div>`;
+                total += subTotal;
+            });
+            
+            html += `<div class="cost-total"><span>총 합계</span><span>${fmt(total)}원</span></div><div class="text-right text-xs text-slate-400 mt-1">1인당 약 ${fmt(Math.round(total/3))}원</div></div>`;
+            
+            html += `<div class="info-card"><h3 class="text-lg font-black text-teal-800 mb-4">✅ 최종 체크리스트</h3><div class="space-y-2">
+                ${['신분증 (전원 필수)', '운전면허증', '충전기/보조배터리', '바람막이/경량패딩', '비상약', '삼각대'].map(i => `
+                <div class="check-item" onclick="this.classList.toggle('checked')"><i class="fas fa-check-circle check-icon"></i> <span class="check-text font-bold text-slate-700 text-sm">${i}</span></div>`).join('')}
+            </div></div></div>`;
+            
+            container.innerHTML = html;
+        }
+
+        // 초기화
+        map = L.map('map', { zoomControl: false }).setView([33.38, 126.55], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        const latlngs = SCHEDULE.filter(s=>s.lat).map(s=>[s.lat, s.lng]);
+        L.polyline(latlngs.slice(2, 13), { color: '#0F766E', weight: 4 }).addTo(map); 
+        L.polyline(latlngs.slice(13), { color: '#F59E0B', weight: 4, dashArray: '5, 10' }).addTo(map);
+        SCHEDULE.forEach(s => {
+             if(s.lat) L.circleMarker([s.lat, s.lng], {radius:5, color:'#F59E0B', fillOpacity:1}).addTo(map);
+        });
+
+        fetchWeather();
+        setInterval(updateClock, 1000);
+        updateClock();
+        renderTimeline(document.getElementById('tab-content'));
+
+    </script>
+</body>
+</html>
