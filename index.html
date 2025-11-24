@@ -1,0 +1,1431 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>제주여행 AI : 스마트 동선 플래너 (Upgraded)</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;600;700;800;900&display=swap');
+        body { font-family: 'Pretendard', sans-serif; -webkit-tap-highlight-color: transparent; background-color: #F8FAFC; margin: 0; padding: 0; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fadeIn { animation: fadeIn 0.4s ease-out forwards; }
+        
+        .active-card { background-color: #FEF2F2 !important; animation: pulse-border 2s infinite; border-width: 2px; }
+        @keyframes pulse-border {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); border-color: #EF4444; }
+            70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); border-color: #F87171; }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); border-color: #EF4444; }
+        }
+        .stamped-card { background-color: #FFFBEB !important; border-color: #F59E0B !important; border-width: 2px; }
+        @keyframes stamp-bounce { 0% { transform: scale(2); opacity: 0; } 60% { transform: scale(0.9); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+        .stamp-mark { animation: stamp-bounce 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        @keyframes progress-shim { 0% { background-position: -100% 0; } 100% { background-position: 100% 0; } }
+        .progress-bar-animated { background: linear-gradient(90deg, #0D9488 0%, #2DD4BF 50%, #0D9488 100%); background-size: 200% 100%; animation: progress-shim 2s linear infinite; }
+        
+        .leaflet-popup-content-wrapper { border-radius: 8px; padding: 0; box-shadow: 0 4px 15px rgba(0,0,0,0.15); }
+        .leaflet-popup-content { font-family: 'Pretendard', sans-serif; font-size: 13px; font-weight: 800; margin: 8px 12px; color: #0F766E; }
+        .leaflet-container a.leaflet-popup-close-button { display: none; } 
+
+        /* Custom Map Marker Badge */
+        .map-marker-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            font-weight: 800;
+            font-size: 12px;
+            color: white;
+        }
+
+        @media print {
+            @page { margin: 1cm; size: A4; }
+            body { background-color: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            .schedule-container { margin-top: 0 !important; box-shadow: none !important; border: none !important; padding-bottom: 0 !important; }
+            .timeline-item { break-inside: avoid; page-break-inside: avoid; border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 20px; }
+            .timeline-line { display: none !important; }
+            .timeline-time { width: auto !important; font-size: 1.2em !important; color: #0F766E !important; margin-bottom: 5px; }
+            .timeline-content { padding-left: 0 !important; border: 1px solid #ddd !important; border-radius: 8px !important; box-shadow: none !important; }
+            textarea { border: none !important; resize: none; height: auto; background: transparent !important; overflow: hidden; }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+        
+        const urlParams1 = new URLSearchParams(window.location.search);
+        const Datekey = urlParams1.get('dt');
+        let TEST_DATE_STRING = null; 
+        if (Datekey && Datekey.length >= 10) {
+            TEST_DATE_STRING = `${Datekey.substring(0,4)}-${Datekey.substring(4,6)}-${Datekey.substring(6,8)}T${Datekey.substring(8,10)}:${Datekey.substring(10,12)}:00`;
+        } else if (Datekey && Datekey.length >= 8) {
+             TEST_DATE_STRING = Datekey;
+        }
+
+        // =========================================
+        // 1. 공통 컴포넌트
+        // =========================================
+        const Icon = ({ name, size = 24, className = "", ...props }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (window.lucide && iconRef.current && iconRef.current.parentNode) {
+                    window.lucide.createIcons({ root: iconRef.current.parentNode, nameAttr: 'data-lucide', attrs: { width: size, height: size, class: className, ...props } });
+                }
+            }, [name, size, className]);
+            return <i ref={iconRef} data-lucide={name} style={{ width: size, height: size, display: 'inline-block' }} className={className} {...props}></i>;
+        };
+
+        const Toast = ({ message, onClose }) => {
+			useEffect(() => { const timer = setTimeout(onClose, 3000); return () => clearTimeout(timer); }, []);
+			return (
+				<div className="fixed bottom-24 left-5 z-[3000] flex items-center gap-3 bg-slate-800/95 backdrop-blur-md text-white px-5 py-3 rounded-2xl text-sm font-bold shadow-2xl animate-fadeIn max-w-[85%] no-print">
+					<Icon name="bell" size={20} className="text-teal-400 flex-shrink-0" />
+					<span className="leading-snug">{message}</span>
+				</div>
+			);
+		};
+
+        const NavBtn = ({ active, onClick, icon, label }) => (
+            <div onClick={onClick} className={`text-center w-1/4 cursor-pointer transition-colors ${active ? 'text-teal-700 font-extrabold' : 'text-slate-400 font-normal'}`}>
+                <div className="block mb-1 mx-auto w-fit">
+                    <Icon name={icon} size={24} strokeWidth={active ? 2.8 : 2} />
+                </div>
+                <span className="text-[10px] block">{label}</span>
+            </div>
+        );
+
+        // =========================================
+        // 2. 챗봇 컴포넌트 (비용 연동 기능 강화)
+        // =========================================
+        const ChatWidget = ({ onClose, schedule, places, costs, onUpdateSchedule, onResetSchedule, currentTime }) => {
+            const getInitialMessage = () => {
+                return '안녕하세요! AI 제주 가이드입니다. 🍊\n\n일정을 변경하거나 맛집을 추천해드릴 수 있어요. "점심 장소 변경해줘"라고 말해보세요!';
+            };
+
+            const [messages, setMessages] = useState([{ role: 'bot', text: getInitialMessage() }]);
+            const [input, setInput] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [dynamicApiKey, setDynamicApiKey] = useState("");
+            const [userLocation, setUserLocation] = useState(null); 
+            const [pendingUpdates, setPendingUpdates] = useState(null);
+            const messagesEndRef = useRef(null);
+
+            useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), [messages]);
+
+            useEffect(() => {
+                const detectLocation = () => {
+                    let estimatedLoc = { lat: 33.5104, lng: 126.4913, name: "제주공항" }; 
+                    let currentItem = null;
+                    const now = currentTime || new Date();
+                    for (let i = schedule.length - 1; i >= 0; i--) {
+                        const item = schedule[i];
+                        const itemDate = getItemDate(item.day, item.time);
+                        if (itemDate && itemDate <= now && item.lat) {
+                            currentItem = item;
+                            break;
+                        }
+                    }
+                    if (currentItem) {
+                        estimatedLoc = { lat: currentItem.lat, lng: currentItem.lng, name: currentItem.title };
+                    }
+
+                    if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(
+                            (position) => {
+                                const { latitude, longitude } = position.coords;
+                                let nearestName = "현위치";
+                                let minD = 9999;
+                                [...schedule, ...places].forEach(p => {
+                                    if(p.lat) {
+                                        const d = calculateDistance(latitude, longitude, p.lat, p.lng);
+                                        if (d < minD) { minD = d; nearestName = p.title || p.name; }
+                                    }
+                                });
+                                const finalName = minD < 2 ? `${nearestName} 근처` : "제주 어딘가";
+                                setUserLocation({ lat: latitude, lng: longitude, name: finalName, isGPS: true });
+                            },
+                            (error) => {
+                                setUserLocation({ ...estimatedLoc, isGPS: false });
+                            }
+                        );
+                    } else {
+                        setUserLocation({ ...estimatedLoc, isGPS: false });
+                    }
+                };
+                detectLocation();
+            }, []);
+
+            const sendMessage = async () => {
+                if (!input.trim()) return;
+                const userMsg = input;
+                setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+                setInput('');
+                setIsLoading(true);
+                setPendingUpdates(null);
+
+                const urlParams = new URLSearchParams(window.location.search);
+                let apiKey = urlParams.get('key');
+                if (!apiKey) apiKey = dynamicApiKey;
+
+                if (!apiKey || apiKey.length < 10) {
+                    if (userMsg.length > 10 && userMsg.startsWith("AI")) { 
+                         setDynamicApiKey(userMsg.trim()); 
+                         setMessages(prev => [...prev, { role: 'bot', text: `API Key 설정 완료! 똑똑하게 도와드릴게요 🍊` }]);
+                        setIsLoading(false);
+                        return;
+                    } else {
+                        setTimeout(() => {
+                            setMessages(prev => [...prev, { role: 'bot', text: "⚠️ API Key가 필요합니다.\n채팅창에 입력하거나 URL(?key=...)을 확인해주세요." }]);
+                            setIsLoading(false);
+                        }, 500);
+                        return;
+                    }
+                }
+
+                try {
+                    const contextLoc = userLocation ? `위도:${userLocation.lat}, 경도:${userLocation.lng} (${userLocation.name})` : "위치 파악 중";
+                    const contextTime = currentTime ? currentTime.toLocaleString() : new Date().toLocaleString();
+                    
+                    // 비용 데이터를 텍스트로 변환하여 AI에게 전달
+                    const costContext = costs.map(cat => 
+                        cat.items.map(item => `${item.n} (${item.v}원)`).join(", ")
+                    ).join(" / ");
+
+                    const context = `
+                        [시스템 설정]
+                        당신은 제주도 여행 전문가 AI입니다.
+                        
+                        [필수 검증 규칙]
+                        1. **실존 장소 검증**: 추천하거나 변경하려는 장소가 실제 제주도에 존재하는지, 현재 영업 중인지 검증하십시오.
+                        2. **위치 정확성**: 위도/경도는 반드시 소수점 4자리 이상 정확해야 합니다.
+                        3. **경비 연동 필수**: 식당이나 유료 관광지로 일정을 변경할 경우, 반드시 'costUpdate' 필드를 채워야 합니다. 아래 [현재 경비 항목]에서 가장 유사한 항목 이름을 찾아 매핑하십시오.
+
+                        [현재 사용자 상황]
+                        - 시간: ${contextTime}
+                        - 위치: ${contextLoc}
+                        - 인원: 3명 (비용 계산 시 필수)
+
+                        [현재 일정 데이터]
+                        ${schedule.map(s => `ID:${s.id} | ${s.time} | ${s.title}`).join('\n')}
+
+                        [현재 경비 항목 (중요)]
+                        ${costContext}
+
+                        [응답 포맷]
+                        일정 변경이 필요한 경우에만 아래 JSON 포맷을 사용하십시오.
+                        
+                        <<<UPDATE_SCHEDULE: {
+                            "updates": [
+                                {
+                                    "targetId": "변경할_일정_ID",
+                                    "newTitle": "새로운 장소명",
+                                    "newDesc": "한줄 설명",
+                                    "newDetail": "AI추천사유 (실존 장소 검증됨)",
+                                    "newLat": 33.xxxx,
+                                    "newLng": 126.xxxx,
+                                    "costUpdate": { 
+                                        "targetItemName": "현재_경비_항목_이름(정확히)", 
+                                        "newItemName": "새항목 (3인)", 
+                                        "newAmount": 0 
+                                    },
+                                    "newPlaceInfo": { "name": "장소명(괄호없음)", "type": "meal/cafe/tour", "main": "...", "desc": "...", "tips": ["..."] }
+                                }
+                            ],
+                            "replyMessage": "변경 제안 메시지"
+                        }>>>
+                    `;
+
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: `${context}\n\n사용자 발화: ${userMsg}` }] }] })
+                    });
+                    const data = await response.json();
+                    
+                    let botMsg = data.candidates?.[0]?.content?.parts?.[0]?.text || "죄송해요, 이해하지 못했습니다.";
+                    
+                    const commandMatch = botMsg.match(/<<<UPDATE_SCHEDULE:\s*(\{[\s\S]*?\})\s*>>>/);
+                    if (commandMatch) {
+                        try {
+                            const commandData = JSON.parse(commandMatch[1]);
+                            botMsg = commandData.replyMessage || "일정 변경을 제안합니다.";
+                            setPendingUpdates(commandData.updates);
+                        } catch (e) {
+                            console.error("JSON Parse Error", e);
+                            botMsg += "\n(데이터 처리 중 오류가 발생했습니다)";
+                        }
+                        botMsg = botMsg.replace(/<<<UPDATE_SCHEDULE:[\s\S]*?>>>/, "").trim();
+                    }
+
+                    setMessages(prev => [...prev, { role: 'bot', text: botMsg }]);
+                } catch (error) {
+                    setMessages(prev => [...prev, { role: 'bot', text: `통신 오류: ${error.message}` }]);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            const confirmUpdates = () => {
+                if (pendingUpdates) {
+                    onUpdateSchedule(pendingUpdates);
+                    setMessages(prev => [...prev, { role: 'bot', text: "✅ 일정이 변경되고 경비 예산도 수정되었습니다!" }]);
+                    setPendingUpdates(null);
+                }
+            };
+
+            const cancelUpdates = () => {
+                setMessages(prev => [...prev, { role: 'bot', text: "변경을 취소했습니다. 다른 장소를 찾아드릴까요?" }]);
+                setPendingUpdates(null);
+            };
+
+            return (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4 animate-fadeIn no-print">
+                    <div className="bg-white w-full max-w-md h-[600px] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+                        <div className="bg-gradient-to-r from-teal-700 to-teal-600 p-4 flex justify-between items-center text-white">
+                            <div className="flex items-center gap-2 font-bold">
+                                <Icon name="bot" size={18}/> 
+                                <div>
+                                    <div className="text-sm">AI 스마트 플래너</div>
+                                    {userLocation && <div className="text-[10px] font-normal opacity-80 flex items-center gap-1"><Icon name="map-pin" size={10}/> {userLocation.name} 감지됨</div>}
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={onResetSchedule} className="text-xs bg-red-500/80 hover:bg-red-500 px-2 py-1 rounded text-white font-bold transition-colors">초기화 옵션</button>
+                                <button onClick={onClose}><Icon name="x" size={24}/></button>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-4">
+                            {messages.map((msg, idx) => (
+                                <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                                    <div className={`max-w-[85%] p-3.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap shadow-sm ${msg.role === 'user' ? 'bg-teal-600 text-white rounded-tr-none' : 'bg-white text-slate-700 border border-slate-200 rounded-tl-none'}`}>
+                                        {msg.role === 'bot' && <div className="mb-1 text-[10px] text-teal-600 font-bold flex items-center gap-1"><Icon name="sparkles" size={10}/> AI 답변</div>}
+                                        {msg.text}
+                                    </div>
+                                    {msg.role === 'bot' && idx === messages.length - 1 && pendingUpdates && (
+                                        <div className="mt-2 w-[85%] bg-white border-2 border-teal-500 rounded-xl p-3 shadow-md animate-fadeIn">
+                                            <div className="text-xs font-bold text-teal-700 mb-2 flex items-center gap-1"><Icon name="alert-circle" size={12}/> 일정 변경 제안</div>
+                                            {pendingUpdates.map((u, i) => (
+                                                <div key={i} className="mb-2 text-sm border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+                                                    <div className="text-slate-400 text-xs strike-through line-through">{schedule.find(s=>s.id === u.targetId)?.title}</div>
+                                                    <div className="text-slate-800 font-bold flex items-center gap-1"><Icon name="arrow-right" size={12} className="text-teal-500"/> {u.newTitle}</div>
+                                                    <div className="text-[10px] text-slate-500 mt-1">{u.newDetail}</div>
+                                                    {u.costUpdate && (
+                                                        <div className="mt-1 bg-orange-50 text-orange-700 p-1.5 rounded text-[10px] flex gap-1 items-center">
+                                                            <Icon name="dollar-sign" size={10}/> 
+                                                            <span>예산 변경: {u.costUpdate.newItemName} ({formatCost(u.costUpdate.newAmount)}원)</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                            <div className="flex gap-2 mt-2">
+                                                <button onClick={cancelUpdates} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-200">취소</button>
+                                                <button onClick={confirmUpdates} className="flex-1 py-2 bg-teal-600 text-white rounded-lg text-xs font-bold hover:bg-teal-700">적용하기</button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                            {isLoading && (
+                                <div className="flex justify-start">
+                                    <div className="bg-white p-3 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm flex items-center gap-2 text-xs text-slate-500">
+                                        <div className="w-2 h-2 bg-teal-500 rounded-full animate-bounce"></div>
+                                        <div className="w-2 h-2 bg-teal-500 rounded-full animate-bounce delay-75"></div>
+                                        <div className="w-2 h-2 bg-teal-500 rounded-full animate-bounce delay-150"></div>
+                                        <span>실존 장소 검증 및 예산 계산 중...</span>
+                                    </div>
+                                </div>
+                            )}
+                            <div ref={messagesEndRef} />
+                        </div>
+                        <div className="p-3 bg-white border-t border-slate-100 flex gap-2">
+                            <input type="text" className="flex-1 bg-slate-100 border-0 rounded-full px-4 py-3 text-sm focus:ring-2 focus:ring-teal-500 outline-none" placeholder="예: 점심을 고기국수로 바꿔줘" value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} />
+                            <button onClick={sendMessage} disabled={isLoading} className="bg-teal-600 text-white p-3 rounded-full hover:bg-teal-700 transition-colors disabled:opacity-50"><Icon name="send" size={18} /></button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // =========================================
+        // 3. 마스터 데이터 (Master Data)
+        // =========================================
+        const SCHEDULE = [
+            { id: 'd0-1', day: 0, time: "D-1", title: "여행 전날 체크", desc: "신분증(전원), 면허증, 테이블링 앱 카드등록 확인", lat: 36.35, lng: 127.38, type: "prep", dist: "-", dur: "-" , detail: "테이블링 페이 등록 안하면 내일 연돈 예약 실패함!" },
+            { id: 'd1-1', day: 1, time: "04:50", title: "대전 집 출발", desc: "가스 잠금 확인. 청주공항까지 1시간.", lat: 36.3504, lng: 127.4370, type: "move", navi: "청주국제공항", dist: "45km", dur: "50분", detail: "제2주차장 위치 미리 파악" },
+            { id: 'd1-2', day: 1, time: "05:40", title: "청주공항 도착", desc: "주차 후 2층 이동. 바이오 등록줄 이용.", lat: 36.7166, lng: 127.4991, type: "fixed", dist: "-", dur: "-" , detail: "신분증 미리 꺼내두기" },
+            { id: 'd1-3', day: 1, time: "06:10", title: "수속 마감", desc: "이스타항공 ZE711 (06:50 출발). 늦으면 탑승 불가.", flightNum: "ZE711", lat: 36.7166, lng: 127.4991, type: "flight", dist: "-", dur: "-", detail: "기내에서 꿀잠 자기" },
+            { id: 'd1-4', day: 1, time: "08:00", title: "제주공항 & 쏘카", desc: "5번 게이트 건너편 렌터카하우스 [5구역 12번]", lat: 33.5104, lng: 126.4913, type: "car", navi: "제주국제공항렌터카하우스", dist: "도보", dur: "10분" , detail: "차량 외관/휠 동영상 촬영 필수 (EV3)" },
+            { id: 'd1-5', day: 1, time: "09:00", title: "자매국수 (아침)", desc: "고기국수. 캐치테이블 대기 확인 필수.", lat: 33.5050, lng: 126.4950, type: "meal", navi: "자매국수본점", dist: "5km", dur: "15분", detail: "캐치테이블로 미리 줄서기 확인", alternatives: [{ name: "올래국수", desc: "수요미식회 맛집. 고기국수 단일 메뉴. (주차 어려움)", navi: "올래국수" }, { name: "만세국수", desc: "현지인 맛집. 대기 짧고 국물 진함. 삼성혈 근처.", navi: "만세국수" }] },
+            { id: 'd1-5-1', day: 1, time: "10:20", title: "이호테우 해변", desc: "말 등대 인생샷 명소. 공항 근처 필수 코스.", lat: 33.4965, lng: 126.4530, type: "tour", navi: "이호테우해수욕장", dist: "3km", dur: "10분", detail: "빨간색/흰색 말 등대 사이에서 사진 찍기" },
+            { id: 'd1-6', day: 1, time: "11:00", title: "클랭블루 & 풍차해안도로", desc: "신창풍차해안도로 드라이브 후 카페.", lat: 33.3450, lng: 126.1700, type: "cafe", navi: "클랭블루", dist: "28km", dur: "45분" , detail: "해안도로 드라이브 코스! 2층 통창 인생샷.", isDrive: true, alternatives: [{ name: "울트라마린", desc: "판포포구 뷰. 노을 맛집이자 오션뷰 끝판왕.", navi: "울트라마린" }] },
+            { 
+                id: 'd1-7', day: 1, time: "12:30", title: "알돈가 (점심)", desc: "현지인 추천 자투리 고기 & 돌솥밥.", lat: 33.3146, lng: 126.2737, type: "meal", navi: "알돈가", dist: "9km", dur: "18분", detail: "짜투리 고기에 돌솥밥+김치찌개 필수",
+                alternatives: [
+                    { name: "명리동식당", desc: "김치전골과 짜투리고기로 유명한 인근 찐맛집.", navi: "명리동식당" },
+                    { name: "양가형제", desc: "청수리 평화동 회관을 개조한 수제버거 맛집.", navi: "양가형제" }
+                ]
+            },
+            { id: 'd1-8', day: 1, time: "14:00", title: "송악산 둘레길", desc: "식후 소화 트레킹. 절벽 뷰 예술.", lat: 33.1994, lng: 126.2908, type: "tour", navi: "송악산주차장", dist: "14km", dur: "25분", detail: "바람 강함! 바람막이 필수 착용", alternatives: [{ name: "산방산 탄산온천", desc: "바람 너무 불거나 추우면 온천욕 추천. (야외 노천탕)", navi: "산방산탄산온천" }] },
+            { id: 'd1-9', day: 1, time: "15:30", title: "원앤온리 (카페)", desc: "산방산 배산임수 뷰. 야외 테라스 휴식.", lat: 33.2392, lng: 126.3195, type: "cafe", navi: "원앤온리", dist: "5km", dur: "10분", detail: "사람 많으면 테이크아웃 후 바로 앞 해변 산책" },
+            { id: 'd1-10', day: 1, time: "16:30", title: "카멜리아힐", desc: "11월 동백꽃 축제. 일몰 전 사진 촬영.", lat: 33.2872, lng: 126.3705, type: "tour", navi: "카멜리아힐", dist: "10km", dur: "15분", detail: "흰색/밝은색 옷이 사진 잘 나옴", alternatives: [{ name: "오설록 티 뮤지엄", desc: "비 오거나 너무 추우면 실내 추천. 녹차 아이스크림.", navi: "오설록티뮤지엄" }, { name: "본태박물관", desc: "안도 타다오 건축. 비 오는 날 운치 최고. (입장료 비쌈)", navi: "본태박물관" }] },
+            { id: 'd1-11', day: 1, time: "17:50", title: "더본호텔 체크인", desc: "체크인 후 10시 연돈 예약 성공 여부 확인.", lat: 33.2595, lng: 126.4061, type: "hotel", navi: "호텔더본제주", dist: "8km", dur: "15분", detail: "웰컴쿠폰북(빽다방 빵) 꼭 챙기기" },
+            { id: 'd1-12', day: 1, time: "19:00", title: "연돈 (저녁)", desc: "오전 10시 현장 예약 성공 시 식사.", lat: 33.2595, lng: 126.4061, type: "meal", navi: "연돈", dist: "도보", dur: "1분", detail: "실패시: 바로 옆 연돈볼카츠 포장 치맥", alternatives: [{ name: "Plan B: 숙성도 중문점", desc: "제주 프리미엄 흑돼지. 1순위 대안. (캐치테이블 필수)", navi: "숙성도중문점" }, { name: "Plan C: 큰갯물횟집", desc: "대포포구 뷰 자연산 활어회. 가족끼리 조용히 식사.", navi: "큰갯물횟집" }] },
+            { id: 'd1-13', day: 1, time: "21:00", title: "호텔 룸 시네마", desc: "가족을 위한 액션/판타지/SF 무비 나잇.", lat: 33.2595, lng: 126.4061, type: "movie", dist: "호텔내", dur: "-", detail: "추천: '아바타: 물의 길', '가디언즈 오브 갤럭시 3', '해리포터 시리즈'. 빽다방 빵 & 볼카츠와 함께.", isSpecial: true },
+            // Day 2
+            { id: 'd2-1', day: 2, time: "07:00", title: "탐모라 (조식)", desc: "호텔 지하 1층. 06:50 오픈런 추천.", lat: 33.2595, lng: 126.4061, type: "meal", dist: "-", dur: "-" , detail: "쌀국수 & 수제햄 공략" },
+            { id: 'd2-2', day: 2, time: "09:00", title: "휴애리", desc: "동백 & 흑돼지 쇼(10시). 감귤 따기.", lat: 33.2830, lng: 126.6330, type: "tour", navi: "휴애리자연생활공원", dist: "25km", dur: "40분", detail: "흑돼지 쇼 시간 맞춰 이동" },
+            { id: 'd2-3', day: 2, time: "10:50", title: "귤꽃다락 (카페)", desc: "돌창고 감성 카페. 귤밭 포토존.", lat: 33.2685, lng: 126.6300, type: "cafe", navi: "귤꽃다락", dist: "5km", dur: "10분", detail: "본관 거울샷 & 별관이 조용함", alternatives: [{ name: "베케 (Veke)", desc: "이끼 정원이 아름다운 핫플. 조용하고 세련됨.", navi: "베케" }] },
+            { id: 'd2-4', day: 2, time: "12:00", title: "용눈이오름", desc: "완만한 경사. 정상 뷰 탁월.", lat: 33.4340, lng: 126.8430, type: "tour", navi: "용눈이오름주차장", dist: "23km", dur: "35분" , detail: "정상 바람 주의", alternatives: [{ name: "스누피가든", desc: "걷기 힘들거나 아이들이 좋아할 곳. 실내/실외 모두 완벽.", navi: "스누피가든" }] },
+            { id: 'd2-5', day: 2, time: "13:00", title: "낭뜰에쉼팡 (점심)", desc: "속 편한 쌈밥 정식.", lat: 33.4500, lng: 126.6750, type: "meal", navi: "낭뜰에쉼팡", dist: "12km", dur: "20분", detail: "고등어구이 추가 추천", alternatives: [{ name: "선흘방주할머니식당", desc: "검은콩국수와 곰탕. 찐 로컬 건강 맛집.", navi: "선흘방주할머니식당" }] },
+            { id: 'd2-6', day: 2, time: "14:10", title: "에코랜드", desc: "기차 타고 곶자왈 숲 힐링.", lat: 33.4550, lng: 126.6700, type: "tour", navi: "에코랜드테마파크", dist: "3km", dur: "5분", detail: "레이크사이드역 풍차 배경 촬영", alternatives: [{ name: "비자림", desc: "천년의 숲. 피톤치드 가득한 평지 산책로.", navi: "비자림" }, { name: "돌문화공원", desc: "제주의 신비로운 분위기. 하늘연못 포토존.", navi: "제주돌문화공원" }] },
+            { id: 'd2-7', day: 2, time: "15:50", title: "카페 델문도", desc: "함덕 바다 위 카페.", lat: 33.5431, lng: 126.6690, type: "cafe", navi: "카페델문도", dist: "10km", dur: "15분", detail: "야외 테라스 자리 선점 필수" },
+            { id: 'd2-8', day: 2, time: "16:40", title: "쏘카 반납", desc: "★17:00 반납 필수. 주유 확인.", lat: 33.5080, lng: 126.4930, type: "car", navi: "쏘카스테이션제주", dist: "22km", dur: "40분", detail: "금요일 퇴근길 정체 고려" },
+            { id: 'd2-9', day: 2, time: "17:30", title: "공항 저녁/쇼핑", desc: "면세점 오메기떡/마음샌드 픽업.", lat: 33.5104, lng: 126.4913, type: "meal", dist: "셔틀", dur: "15분", detail: "오메기떡/마음샌드 픽업"},
+            { id: 'd2-10', day: 2, time: "19:05", title: "청주행 출발", desc: "TW836 (수속 18:25 마감).", flightNum: "TW836", lat: 33.5104, lng: 126.4913, type: "flight", dist: "-", dur: "-" , detail: "탑승구 번호 재확인" },
+            { id: 'd2-11', day: 2, time: "20:15", title: "청주공항 도착", desc: "주차 정산 후 귀가.", lat: 36.7166, lng: 127.4991, type: "move", dist: "-", dur: "1시간 10분", detail: "안전 운전 귀가" },
+            { id: 'd2-12', day: 2, time: "21:20", title: "대전 집 도착", desc: "안전 귀가 완료.", lat: 36.3504, lng: 127.4370, type: "move", navi: "대전복합터미널", dist: "45km", dur: "60분", detail: "짐 정리" }
+        ];
+
+        const DRIVE_COURSE_COORDS = [
+            [33.3450, 126.1700], [33.3400, 126.1650], [33.3350, 126.1620], [33.3300, 126.1600], [33.3250, 126.1580]
+        ];
+
+        const PLACES = [
+            { id: 'p1', name: "연돈", type: "meal", main: "등심(1.1만)/치즈(1.5만)", desc: "국내 최고 돈까스 성지. ★당일 오전 10시 현장 키오스크 등록★ 필수.", tips: ["투숙객 꿀팁: 아침 9:30쯤 슬리퍼 신고 나가서 줄 서 있다가 등록하고 오세요.", "카레(5천원)는 선택이 아닌 필수. 밥 비벼 먹으면 극락.", "실패시: 바로 옆 '연돈볼카츠' 포장해서 호텔방 맥주 파티."] },
+            { id: 'p2', name: "자매국수", type: "meal", main: "고기국수(10,000원)", desc: "공항 근처 1티어. 진한 사골 육수와 치자면.", tips: ["'캐치테이블' 앱으로 공항 도착하자마자 대기 등록하세요.", "비빔국수+돔베고기(소) 조합이 진리."] },
+            { id: 'p2-1', name: "이호테우 해변", type: "tour", main: "무료", desc: "제주 공항에서 가장 가까운 해수욕장. 빨간색, 하얀색 말 등대가 랜드마크.", tips: ["등대 앞에서 원근법 샷 필수.", "주차장 넓음. 공항 가는 길에 잠깐 들리기 좋음."] },
+            { id: 'p3', name: "클랭블루", type: "cafe", main: "우도땅콩라떼(8.0)", desc: "풍차해안도로 뷰 갤러리. 2층 통창이 시그니처.", tips: ["2층 중앙 통창은 포토존(좌석X)", "일몰 시간대 역광 실루엣 사진 명소."] },
+            { id: 'p4', name: "알돈가", type: "meal", main: "알돈가세트(2~3인 6.5만)", desc: "가성비 최고의 흑돼지 자투리 구이 전문점. 세트 메뉴 주문 시 돌솥밥과 찌개 포함.", tips: ["★강력추천★ '알돈가 세트' 시키면 고기+돌솥밥+찌개가 다 나옵니다.", "돌솥밥 나오는 데 15분 걸리니 앉자마자 주문하세요.", "강된장에 밥 비벼서 고기랑 드시면 극락."] },
+            { id: 'p5', name: "더본호텔 탐모라", type: "meal", main: "호텔 뷔페(1.2만/투숙객)", desc: "백종원 호텔다운 가성비 끝판왕 조식.", tips: ["07:00 오픈런 필수. 07:30 넘어가면 대기 줄 깁니다.", "쌀국수 코너와 수제 햄 코너는 꼭 공략하세요."] },
+            { id: 'p6', name: "낭뜰에쉼팡", type: "meal", main: "낭뜰정식(14,000원)", desc: "현지인이 찾는 건강 쌈밥집. 자극적이지 않은 맛.", tips: ["고등어구이(7천원) 추가하면 임금님 수라상 안 부러움.", "웨이팅 기계 없음. 카운터에서 번호표 받으세요."] },
+            { id: 'p7', name: "카페 델문도", type: "cafe", main: "베이커리, 커피", desc: "한국의 몰디브 함덕 바다 바로 위.", tips: ["주문 전 야외 테라스 자리 확보.", "마늘바게트 추천."] },
+            { id: 'p8', name: "송악산 둘레길", type: "tour", main: "무료 (소요 1h 20m)", desc: "제주 서남쪽 비경. 산방산, 형제섬, 마라도가 다 보임.", tips: ["바람이 정말 많이 붑니다. 모자 날아감 주의.", "입구 스타벅스에서 음료 사서 산책하면 꿀맛."] },
+            { id: 'p9', name: "카멜리아힐", type: "tour", main: "성인 10,000원", desc: "동양 최대 동백 수목원. 11월은 동백 시즌.", tips: ["흰색/아이보리색 옷 추천 (사진 잘 나옴)", "네이버 예매 시 할인 (당일 사용 가능 확인 필수)."] },
+            { id: 'p10', name: "휴애리", type: "tour", main: "성인 13,000원", desc: "계절 꽃 축제와 흑돼지 쇼.", tips: ["매시 정각 흑돼지 쇼 관람", "감귤 따기 체험(별도) 봉투 꽉 채우기"] },
+            { id: 'p11', name: "에코랜드", type: "tour", main: "성인 16,000원", desc: "곶자왈 숲속 기차 여행.", tips: ["메인역→레이크사이드→피크닉가든 순 이동", "막차 시간 확인"] }
+        ];
+
+        const GUIDES = [
+            { id: 'g0', icon: "shield", color: "text-red-600", title: "🚨 안전 & 비상 연락망 (SOS)", content: ["경찰서: 112, 소방서: 119", "제주대병원 응급실 (북쪽): 064-717-1900", "서귀포의료원 응급실 (남쪽): 064-730-3000", "달빛어린이병원 (연동): 064-727-3650 (심야 진료)", "긴급출동: 렌터카 계약서 확인 필! (쏘카 앱 내 호출)"] },
+            { id: 'g1', icon: "alert-circle", color: "text-amber-600", title: "🚨 연돈 예약 방식 변경 (필독)", content: ["현장 접수: 전날 앱 예약은 폐지되었습니다. 무조건 '당일 오전 10시 매장 앞 캐치테이블 키오스크' 현장 등록만 가능합니다.", "투숙객 전략: 호텔이 바로 옆이니, 아침 9시 30분쯤 슬리퍼 신고 나가서 줄 서 있다가 등록하고, 다시 방에 와서 쉬거나 조식을 드세요.", "입장 알림: 카톡으로 '지금 입장하세요' 알림이 오면 5분 내로 가야 합니다."] },
+            { id: 'g2', icon: "car", color: "text-green-600", title: "🚗 렌터카 & 운전 팁", content: ["쏘카 셔틀: 공항 1층 5번 게이트 건너편 '렌터카하우스' 5구역 12번입니다. (20분 간격)", "슈퍼 자차: 타이어 펑크, 휠 긁힘 등 보장을 위해 '슈퍼 자차(한도 무제한)' 강력 추천.", "회전교차로: 이미 돌고 있는 차가 우선입니다. 진입 시 멈춤, 나갈 때 우측 깜빡이.", "반납 시간: 금요일 저녁 제주시내는 헬게이트입니다. 네비보다 30분 여유롭게 출발하세요."] },
+            { id: 'g3', icon: "plane", color: "text-blue-600", title: "✈️ 공항 이용: 시간 절약 비법", content: ["바이오 등록: 청주공항 2층에서 등록하면 신분증 없이 전용 게이트로 1초 통과.", "모바일 체크인: 24시간 전 카톡 알림 오면 즉시 접속해서 앞좌석(1~5열) 선점.", "기내 반입 금지: 보조배터리, 라이터, 전자담배는 무조건 기내 가방에! (위탁 불가)"] },
+            { id: 'g4', icon: "camera", color: "text-pink-600", title: "📸 11월 제주 날씨 & 옷차림", content: ["바람과의 전쟁: 체감온도 낮음. 경량 패딩 조끼나 바람막이 필수.", "색감 매치: 동백꽃(카멜리아힐)엔 흰색/아이보리. 귤밭엔 베이지/카키.", "삼각대: 가벼운 건 바람에 넘어집니다. 가방 걸어서 무게 중심 낮추세요."] },
+            { id: 'g5', icon: "gift", color: "text-purple-600", title: "🎁 쇼핑 & 먹거리: 호갱 탈출", content: ["초콜릿: 10박스 만원짜리 말고 '제주 리얼 타르트'나 '과즐' 추천.", "오메기떡: 낱개 포장된 '냉동'으로 사야 관리 편함.", "마음샌드: 파리바게트 앱으로 3일 전 예약하고 렌터카하우스점에서 픽업.", "회 포장: 동문시장 야시장보다는 '중문 하나로마트' 회 코너가 가성비 갑."] }
+        ];
+
+        const COST_DATA = [
+            { id: 'c1', cat: "사전 결제 (교통/숙박)", items: [{id: 'i1', n:'항공료(왕복 3인+ 사전좌석)', v: 529200}, {id: 'i2', n:'숙박 (더본 1박)', v: 166000}, {id: 'i3', n:'렌터카 (EV3/자차)', v: 157610}] },
+            { id: 'c2', cat: "현장 식비", items: [
+                {id: 'i4', n:'자매국수 (3인)', v: 30000}, 
+                {id: 'i5', n:'알돈가 (세트메뉴)', v: 70000}, 
+                {id: 'i6', n:'연돈 (돈까스+카레)', v: 60000}, 
+                {id: 'i7', n:'탐모라 조식 (숙박포함)', v: 0},
+                {id: 'i8', n:'낭뜰에쉼팡', v: 50000}, 
+                {id: 'i9', n:'공항 저녁', v: 40000}, 
+                {id: 'i10', n:'카페 4곳', v: 120000}
+            ]},
+            { id: 'c3', cat: "입장료/기타", items: [{id: 'i11', n:'카멜리아힐 (3인)', v: 30000}, {id: 'i12', n:'휴애리 (3인)', v: 39000}, {id: 'i13', n:'에코랜드 (3인)', v: 48000}, {id: 'i14', n:'주유/잡비', v: 30000}] }
+        ];
+
+        const CHECKLIST = ['신분증 (전원 필수)', '운전면허증', '충전기/보조배터리', '바람막이/경량패딩', '비상약', '삼각대', '선글라스', '물티슈', '우산/우비', '세면도구(칫솔)'];
+        const MUSIC_LINKS = [ { name: "🚗 신나는 드라이브", url: "https://www.youtube.com/results?search_query=driving+playlist+kpop" }, { name: "🌊 제주 바다 감성", url: "https://www.youtube.com/results?search_query=jeju+vibe+playlist" }, { name: "☔ 비 오는 날", url: "https://www.youtube.com/results?search_query=rainy+day+jazz" } ];
+
+        // =========================================
+        // [필수] 헬퍼 함수 정의
+        // =========================================
+        const formatCost = (num) => num.toLocaleString();
+        const calculateDistance = (lat1, lng1, lat2, lng2) => {
+            if(!lat1 || !lng1 || !lat2 || !lng2) return 0;
+            const R = 6371; const dLat = (lat2 - lat1) * (Math.PI / 180); const dLon = (lng2 - lng1) * (Math.PI / 180);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return (R * c).toFixed(1);
+        };
+        const useLeaflet = () => { const [loaded, setLoaded] = useState(false); useEffect(() => { if (window.L && window.L.map) { setLoaded(true); return; } setLoaded(true); }, []); return loaded; };
+        
+        // 검색어 정리 기능 추가 (괄호 내용 제거)
+        const openNavi = (name) => { 
+            const cleanName = name.replace(/\([^)]*\)/g, '').trim(); 
+            const isMobile = /Android|iPhone/i.test(navigator.userAgent); 
+            const url = isMobile ? `https://m.map.naver.com/search2/search.naver?query=${encodeURIComponent(cleanName)}` : `https://map.naver.com/v5/search/${encodeURIComponent(cleanName)}`; 
+            window.open(url, '_blank'); 
+        };
+        
+        const openFlightSearch = (flightNum) => { window.open(`https://search.naver.com/search.naver?query=${encodeURIComponent(flightNum + " 운항정보")}`, '_blank'); };
+        const openNearbySearch = (title, category) => { const cleanName = title.replace(/\([^)]*\)/g, '').replace(/둘레길|해안도로|맛집|카페/g, '').replace(/&/g, ' ').trim(); const query = `${cleanName} ${category}`; const isMobile = /Android|iPhone/i.test(navigator.userAgent); const url = isMobile ? `https://m.map.naver.com/search2/search.naver?query=${encodeURIComponent(query)}` : `https://map.naver.com/v5/search/${encodeURIComponent(query)}`; window.open(url, '_blank'); };
+        const getItemDate = (day, time) => { const dateMap = {0: 26, 1: 27, 2: 28}; if(!dateMap[day] || !time || !time.includes(':')) return null; const [h, m] = time.split(':').map(Number); return new Date(2025, 10, dateMap[day], h, m); };
+
+        // OSRM 경로 (비동기)
+        const fetchRoute = async (start, end) => {
+            try { const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`); const data = await response.json(); if (data.code === 'Ok' && data.routes && data.routes.length > 0) { return data.routes[0].geometry.coordinates.map(coord => [coord[1], coord[0]]); } } catch (e) { console.warn("Routing failed", e); } return [start, end];
+        };
+
+        // =========================================
+        // 4. 메인 App 컴포넌트
+        // =========================================
+        function App() {
+            const [scheduleData, setScheduleData] = useState(() => { const saved = localStorage.getItem('jeju_schedule_v6'); return saved ? JSON.parse(saved) : SCHEDULE; });
+            const [placesData, setPlacesData] = useState(() => { const saved = localStorage.getItem('jeju_places_v6'); return saved ? JSON.parse(saved) : PLACES; });
+            const [costData, setCostData] = useState(() => { const saved = localStorage.getItem('jeju_cost_data_v6'); return saved ? JSON.parse(saved) : COST_DATA; });
+            
+            const [activeTab, setActiveTab] = useState('timeline');
+            const [weather, setWeather] = useState(null);
+            const [currentTime, setCurrentTime] = useState(TEST_DATE_STRING ? new Date(TEST_DATE_STRING) : new Date());
+            const [isChatOpen, setIsChatOpen] = useState(false);
+            const [isMapPopupOpen, setIsMapPopupOpen] = useState(false);
+            const [selectedPlace, setSelectedPlace] = useState(null);
+            const [toastMsg, setToastMsg] = useState(null);
+            const [activeScheduleItem, setActiveScheduleItem] = useState(null); 
+            const [tripProgress, setTripProgress] = useState(0);
+            const [isMusicMenuOpen, setIsMusicMenuOpen] = useState(false);
+            const [isWeatherVisible, setIsWeatherVisible] = useState(true);
+            const [isResetMenuOpen, setIsResetMenuOpen] = useState(false); 
+            
+            const [visitedPlaces, setVisitedPlaces] = useState(() => { const saved = localStorage.getItem('jeju_visited'); return saved ? JSON.parse(saved) : []; });
+            const [actualCosts, setActualCosts] = useState(() => { const saved = localStorage.getItem('jeju_costs'); return saved ? JSON.parse(saved) : {}; });
+            const [checklistState, setChecklistState] = useState(() => { const saved = localStorage.getItem('jeju_checklist'); return saved ? JSON.parse(saved) : {}; });
+            const [photoLogs, setPhotoLogs] = useState(() => { const saved = localStorage.getItem('jeju_photologs'); return saved ? JSON.parse(saved) : {}; });
+            const [memoState, setMemoState] = useState(() => { const saved = localStorage.getItem('jeju_memos'); return saved ? JSON.parse(saved) : {}; });
+            
+            // Refs
+            const mapRef = useRef(null);
+            const mapInstanceRef = useRef(null);
+            const routeLayerGroupRef = useRef(null);
+            const popupMapRef = useRef(null);
+            const popupMapInstanceRef = useRef(null);
+            const popupLayerGroupRef = useRef(null);
+            const routeCacheRef = useRef({});
+            const fileInputRefs = useRef({});
+            const restoreInputRef = useRef(null);
+            const activeItemRef = useRef(null);
+            const isLeafletLoaded = useLeaflet();
+
+            useEffect(() => { localStorage.setItem('jeju_schedule_v6', JSON.stringify(scheduleData)); }, [scheduleData]);
+            useEffect(() => { localStorage.setItem('jeju_places_v6', JSON.stringify(placesData)); }, [placesData]);
+            useEffect(() => { localStorage.setItem('jeju_cost_data_v6', JSON.stringify(costData)); }, [costData]);
+            useEffect(() => { localStorage.setItem('jeju_visited', JSON.stringify(visitedPlaces)); }, [visitedPlaces]);
+            useEffect(() => { localStorage.setItem('jeju_costs', JSON.stringify(actualCosts)); }, [actualCosts]);
+            useEffect(() => { localStorage.setItem('jeju_checklist', JSON.stringify(checklistState)); }, [checklistState]);
+            useEffect(() => { localStorage.setItem('jeju_photologs', JSON.stringify(photoLogs)); }, [photoLogs]);
+            useEffect(() => { localStorage.setItem('jeju_memos', JSON.stringify(memoState)); }, [memoState]);
+
+            useEffect(() => {
+                const fetchWeather = async () => {
+                    try { const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=33.25&longitude=126.56&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo'); const data = await res.json(); if (data) setWeather(data); } catch (e) { console.error("Weather Error", e); }
+                };
+                fetchWeather();
+                if (!TEST_DATE_STRING) { const timer = setInterval(() => setCurrentTime(new Date()), 1000); return () => clearInterval(timer); }
+            }, []);
+
+            useEffect(() => {
+                const tripStart = new Date(2025, 10, 27, 4, 50);
+                const tripEnd = new Date(2025, 10, 28, 21, 20);
+                const totalDuration = tripEnd - tripStart;
+                const elapsed = currentTime - tripStart;
+                let progress = 0;
+                if (elapsed > 0) progress = Math.min(100, (elapsed / totalDuration) * 100);
+                setTripProgress(progress);
+                let foundActive = null;
+                scheduleData.forEach(item => {
+                    const itemDate = getItemDate(item.day, item.time);
+                    if (itemDate && currentTime >= itemDate) foundActive = item;
+                });
+                if (!foundActive && progress < 0) foundActive = scheduleData[0];
+                setActiveScheduleItem(foundActive);
+
+                if (foundActive && activeItemRef.current === null) {
+                    setTimeout(() => {
+                        const el = document.getElementById(`item-${foundActive.id}`);
+                        if (el) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            setToastMsg(`현재 일정: ${foundActive.title}`);
+                            activeItemRef.current = foundActive.id; 
+                        }
+                    }, 800);
+                }
+            }, [currentTime, scheduleData]);
+
+            const getDDay = () => { const tripDate = new Date('2025-11-27T00:00:00'); const now = TEST_DATE_STRING ? new Date(TEST_DATE_STRING) : new Date(); const diff = Math.ceil((tripDate - now) / (1000 * 60 * 60 * 24)); if (diff > 0) return `D-${diff}`; if (diff === 0) return "Day 1"; if (diff === -1) return "Day 2"; return "여행종료"; };
+            const getWeatherIcon = (code) => { if (code > 50) return <Icon name="cloud-rain" size={14} className="text-blue-400"/>; if (code > 3) return <Icon name="cloud" size={14} className="text-slate-400"/>; return <Icon name="sun" size={14} className="text-amber-400"/>; };
+            const getTypeIcon = (type) => { switch (type) { case 'meal': return <Icon name="utensils" size={16} />; case 'cafe': return <Icon name="coffee" size={16} />; case 'tour': return <Icon name="camera" size={16} />; case 'flight': return <Icon name="plane" size={16} />; case 'car': return <Icon name="car" size={16} />; case 'hotel': return <Icon name="home" size={16} />; case 'movie': return <Icon name="film" size={16} />; default: return <Icon name="map-pin" size={16} />; } };
+            const toggleStamp = (e, id) => { e.stopPropagation(); if (visitedPlaces.includes(id)) { setVisitedPlaces(visitedPlaces.filter(pid => pid !== id)); } else { setVisitedPlaces([...visitedPlaces, id]); setToastMsg("🎉 방문 인증 완료! 스탬프 쾅!"); } };
+            const handleCostChange = (id, value) => { const numVal = parseInt(value.replace(/[^0-9]/g, ''), 10) || 0; setActualCosts(prev => ({ ...prev, [id]: numVal })); };
+            const toggleChecklist = (item) => { setChecklistState(prev => ({ ...prev, [item]: !prev[item] })); };
+            const handlePhotoUpload = (e, id) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => { setPhotoLogs(prev => ({ ...prev, [id]: reader.result })); setToastMsg("📸 사진이 기록되었습니다! (로컬 저장)"); }; reader.readAsDataURL(file); } };
+            const handlePhotoDelete = (e, id) => { e.stopPropagation(); if (window.confirm("정말 이 사진을 삭제하시겠습니까?")) { const newLogs = { ...photoLogs }; delete newLogs[id]; setPhotoLogs(newLogs); setToastMsg("🗑️ 사진이 삭제되었습니다."); } };
+            const handleMemoChange = (id, value) => { setMemoState(prev => ({ ...prev, [id]: value })); };
+            const handlePrint = () => { window.print(); };
+
+            // 공유 기능 추가
+            const shareLocation = (item) => {
+                const cleanTitle = item.title.replace(/\([^)]*\)/g, '').trim();
+                const shareData = {
+                    title: cleanTitle,
+                    text: `제주 여행 중: ${cleanTitle}\n${item.desc}`,
+                    url: `https://m.map.naver.com/search2/search.naver?query=${encodeURIComponent(cleanTitle)}`
+                };
+
+                if (navigator.share) {
+                    navigator.share(shareData).catch(err => console.log('공유 실패', err));
+                } else {
+                    navigator.clipboard.writeText(`${cleanTitle}\n${item.desc}\n${shareData.url}`);
+                    setToastMsg("📋 주소가 복사되었습니다! 카톡에 붙여넣기 하세요.");
+                }
+            };
+
+            const exportToCalendar = () => {
+                const dateMap = {0: '20251126', 1: '20251127', 2: '20251128'};
+                let icsContent = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//JejuMasterpiece//KR\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n`;
+                scheduleData.forEach((item) => {
+                    const date = dateMap[item.day];
+                    let timeStart = '000000';
+                    let timeEnd = '010000';
+                    if (item.time && item.time.includes(':')) {
+                        const [h, m] = item.time.split(':');
+                        timeStart = `${h}${m}00`;
+                        let endH = parseInt(h) + 1;
+                        timeEnd = `${endH < 10 ? '0'+endH : endH}${m}00`;
+                    }
+                    icsContent += `BEGIN:VEVENT\nSUMMARY:${item.title}\nDTSTART:${date}T${timeStart}\nDTEND:${date}T${timeEnd}\nDESCRIPTION:${item.desc}\nLOCATION:${item.navi || '제주도'}\nEND:VEVENT\n`;
+                });
+                icsContent += `END:VCALENDAR`;
+                const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = window.URL.createObjectURL(blob);
+                link.setAttribute('download', 'jeju_plan.ics');
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            // ----------------------------------------------------------------------------------
+            // [CORE FUNCTION] 일정 업데이트 핸들러 (버그 수정 및 기능 강화)
+            // ----------------------------------------------------------------------------------
+            const handleUpdateSchedule = (updateDataInput) => {
+                const updates = Array.isArray(updateDataInput) ? updateDataInput : [updateDataInput];
+
+                let currentSchedule = [...scheduleData];
+                let currentCostData = [...costData];
+                let currentPlaces = [...placesData];
+                let currentActualCosts = {...actualCosts};
+
+                updates.forEach(updateData => {
+                    // 1. [버그 수정됨] 이전 장소 삭제 로직 (스마트 매칭)
+                    // 기존: 단순히 title과 name이 정확히 일치해야 삭제됨 -> 수정: 포함 여부 및 특수문자 제거 후 비교
+                    const targetItem = currentSchedule.find(s => s.id === updateData.targetId);
+                    if (targetItem) {
+                        // 일정이 "클랭블루 & 풍차해안도로"일 경우 "클랭블루", "풍차해안도로" 둘 다 체크
+                        const potentialNames = targetItem.title.split(/[&+\/]/).map(s => s.replace(/\([^)]*\)/g, '').trim());
+                        
+                        // 플레이스 목록에서 위 키워드를 포함하는 항목 제거
+                        currentPlaces = currentPlaces.filter(p => {
+                            const placeName = p.name.replace(/\s/g, ''); // 공백제거
+                            const isMatch = potentialNames.some(keyword => {
+                                const cleanKeyword = keyword.replace(/\s/g, '');
+                                return placeName === cleanKeyword || placeName.includes(cleanKeyword) || cleanKeyword.includes(placeName);
+                            });
+                            return !isMatch; // 매칭되면 제거 (false 반환)
+                        });
+                    }
+
+                    // 2. 일정 업데이트
+                    currentSchedule = currentSchedule.map(item => {
+                        if (item.id === updateData.targetId) {
+                            return {
+                                ...item,
+                                title: updateData.newTitle,
+                                desc: updateData.newDesc,
+                                lat: updateData.newLat,
+                                lng: updateData.newLng,
+                                navi: updateData.newTitle,
+                                detail: updateData.newDetail ? `${updateData.newDetail}` : item.detail,
+                            };
+                        }
+                        return item;
+                    });
+
+                    // 3. 비용(Cost) 업데이트
+                    if (updateData.costUpdate) {
+                        const { targetItemName, newItemName, newAmount } = updateData.costUpdate;
+                        let updatedCostId = null;
+
+                        currentCostData = currentCostData.map(g => ({
+                            ...g,
+                            items: g.items.map(i => {
+                                const cleanCurrent = i.n.replace(/\s/g, '');
+                                const cleanTarget = targetItemName.replace(/\s/g, '');
+                                if (i.n.includes(targetItemName) || cleanCurrent.includes(cleanTarget)) {
+                                    updatedCostId = i.id;
+                                    return { ...i, n: newItemName, v: newAmount };
+                                }
+                                return i;
+                            })
+                        }));
+
+                        if (updatedCostId && currentActualCosts[updatedCostId]) {
+                            delete currentActualCosts[updatedCostId];
+                        }
+                    }
+
+                    // 4. 새로운 플레이스 정보 추가
+                    if (updateData.newPlaceInfo) {
+                        const newP = updateData.newPlaceInfo;
+                        const exists = currentPlaces.find(p => p.name === newP.name);
+                        if (!exists) {
+                            currentPlaces = [newP, ...currentPlaces];
+                        }
+                    }
+                });
+
+                // 거리 재계산 로직
+                for (let i = 0; i < currentSchedule.length - 1; i++) {
+                    const curr = currentSchedule[i];
+                    const next = currentSchedule[i+1];
+                    if (curr.day === next.day && curr.lat && next.lat && curr.type !== 'flight' && next.type !== 'flight') {
+                         const d = calculateDistance(curr.lat, curr.lng, next.lat, next.lng);
+                         next.dist = `${d}km`;
+                         next.dur = `${Math.ceil(d*1.5+5)}분`;
+                    }
+                }
+
+                setScheduleData(currentSchedule);
+                setCostData(currentCostData);
+                setPlacesData(currentPlaces);
+                setActualCosts(currentActualCosts);
+                
+                const msg = updates.length > 1 
+                    ? `✨ ${updates[0].newTitle} 외 ${updates.length - 1}건의 일정이 최적화되었습니다!`
+                    : `✨ ${updates[0].newTitle}(으)로 변경 완료! (플레이스/경비 수정됨)`;
+                setToastMsg(msg);
+            };
+
+            const handleSelectReset = (option) => {
+                if (!window.confirm("선택한 항목을 정말 초기 상태로 되돌릴까요?")) return;
+
+                if (option === 'all') {
+                    setScheduleData(SCHEDULE); setPlacesData(PLACES); setCostData(COST_DATA);
+                    localStorage.clear(); 
+                    setToastMsg("🔄 모든 데이터가 초기화되었습니다.");
+                    setTimeout(() => window.location.reload(), 500);
+                } else if (option === 'day1') {
+                    setScheduleData(prev => [...SCHEDULE.filter(s => s.day === 1), ...prev.filter(s => s.day !== 1)]);
+                    setToastMsg("🔄 1일차 일정이 초기화되었습니다.");
+                } else if (option === 'day2') {
+                    setScheduleData(prev => [...SCHEDULE.filter(s => s.day === 2), ...prev.filter(s => s.day !== 2)]);
+                    setToastMsg("🔄 2일차 일정이 초기화되었습니다.");
+		        } else if (option === 'place') {
+                    setPlacesData(PLACES);
+                    setToastMsg("🔄 플레이스가 초기화되었습니다.");
+                } else if (option === 'cost') {
+                    setCostData(COST_DATA);
+                    setActualCosts({});
+                    setToastMsg("💰 경비 내역이 초기화되었습니다.");
+                }
+                setIsResetMenuOpen(false);
+                setIsChatOpen(false);
+            };
+            
+            const handleResetSchedule = () => {
+                setIsResetMenuOpen(true);
+            };
+
+            const backupData = () => {
+                const data = { scheduleData, placesData, costData, visitedPlaces, actualCosts, checklistState, photoLogs, memoState, timestamp: new Date().toISOString() };
+                const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+                const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `jeju_backup_${new Date().toISOString().slice(0,10)}.json`;
+                document.body.appendChild(link); link.click(); document.body.removeChild(link); setToastMsg("💾 백업 파일이 저장되었습니다.");
+            };
+
+            const restoreData = (e) => {
+                const file = e.target.files[0]; if (!file) return; const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try { const d = JSON.parse(evt.target.result); if(d.scheduleData) setScheduleData(d.scheduleData); if(d.placesData) setPlacesData(d.placesData); if(d.costData) setCostData(d.costData); if(d.visitedPlaces) setVisitedPlaces(d.visitedPlaces); if(d.actualCosts) setActualCosts(d.actualCosts); if(d.checklistState) setChecklistState(d.checklistState); if(d.photoLogs) setPhotoLogs(d.photoLogs); if(d.memoState) setMemoState(d.memoState); setToastMsg("♻️ 데이터 복원 완료!"); } catch (err) { alert("파일 오류"); }
+                }; reader.readAsText(file); e.target.value = null;
+            };
+
+            const getCostSummary = () => {
+                const summary = { c1: 0, c2: 0, c3: 0, totalSpent: 0, totalBudget: 0 };
+                summary.totalBudget = costData.reduce((acc, grp) => acc + grp.items.reduce((s, i) => s + i.v, 0), 0);
+                Object.keys(actualCosts).forEach(key => {
+                    const val = actualCosts[key];
+                    if (['i1', 'i2', 'i3'].includes(key)) summary.c1 += val; else if (['i11', 'i12', 'i13', 'i14'].includes(key)) summary.c3 += val; else summary.c2 += val;
+                    summary.totalSpent += val;
+                });
+                return summary;
+            };
+            const costSummary = getCostSummary();
+            const spentPercent = Math.min(100, Math.round((costSummary.totalSpent / costSummary.totalBudget) * 100)) || 0;
+            const c1Deg = costSummary.totalSpent ? (costSummary.c1 / costSummary.totalSpent) * 360 : 0;
+            const c2Deg = costSummary.totalSpent ? (costSummary.c2 / costSummary.totalSpent) * 360 : 0;
+
+            // [신규 기능] 여행 스타일 분석 (Gamification)
+            const getTravelStyle = () => {
+                const activities = scheduleData.filter(s => s.type === 'tour' || s.type === 'cafe' || s.type === 'meal');
+                const total = activities.length;
+                if (total === 0) return { title: "여행 준비 중..", desc: "아직 일정이 없어요!", icon: "loader", color: "text-slate-400" };
+
+                const meals = activities.filter(s => s.type === 'meal' || s.type === 'cafe').length;
+                const tours = activities.filter(s => s.type === 'tour').length;
+                
+                const foodRatio = meals / total;
+                const tourRatio = tours / total;
+
+                if (foodRatio > 0.6) return { title: "🍊 맛집 탐방가 (Foodie)", desc: "제주의 맛을 정복하러 오셨군요! 식도락 여행 최고!", icon: "utensils", color: "text-orange-600", bg: "bg-orange-100" };
+                if (tourRatio > 0.6) return { title: "🏃 부지런한 탐험가 (Explorer)", desc: "1분 1초가 아깝다! 핫플 정복러 스타일.", icon: "map", color: "text-blue-600", bg: "bg-blue-100" };
+                return { title: "🌿 여유로운 힐러 (Healer)", desc: "먹고 보고 쉬고, 밸런스가 완벽한 여행 고수.", icon: "smile", color: "text-green-600", bg: "bg-green-100" };
+            };
+
+            const drawMapLayers = async (layerGroup) => {
+                if (!layerGroup) return;
+                layerGroup.clearLayers();
+                const days = [1, 2];
+                let markerSequence = 1; 
+                const segmentsToFetch = []; 
+
+                for (const day of days) {
+                    const color = day === 1 ? '#0F766E' : '#F97316';
+                    const daySegments = scheduleData.filter(s => s.day === day && s.lat && s.lng && s.type !== 'flight');
+                    if (daySegments.length === 0) continue;
+
+                    daySegments.forEach((s) => {
+                        const sequenceIcon = L.divIcon({
+                            className: 'custom-map-icon',
+                            html: `<div class="map-marker-badge" style="background-color: ${color};">${markerSequence}</div>`,
+                            iconSize: [24, 24],
+                            iconAnchor: [12, 12]
+                        });
+                        const marker = L.marker([s.lat, s.lng], { icon: sequenceIcon }).addTo(layerGroup);
+                        marker.bindPopup(`
+                            <div style="text-align:center;">
+                                <div style="font-size:14px; font-weight:bold; color:${color}; margin-bottom:4px;">${markerSequence}. ${s.title}</div>
+                                <div style="font-size:11px; color:#666;">${s.desc}</div>
+                            </div>
+                        `);
+                        marker.on('click', () => {
+                            document.getElementById(`item-${s.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            setActiveTab('timeline');
+                        });
+                        markerSequence++;
+                    });
+
+                    const simplePts = daySegments.map(s => [s.lat, s.lng]);
+                    L.polyline(simplePts, { color: color, weight: 3, opacity: 0.4, dashArray: '5, 10' }).addTo(layerGroup);
+
+                    if (daySegments.length > 1) {
+                        for (let i = 0; i < daySegments.length - 1; i++) {
+                            const start = [daySegments[i].lat, daySegments[i].lng];
+                            const end = [daySegments[i+1].lat, daySegments[i+1].lng];
+                            const cacheKey = `${start.join(',')}-${end.join(',')}`;
+                            if (routeCacheRef.current[cacheKey]) {
+                                L.polyline(routeCacheRef.current[cacheKey], { color: color, weight: 5, opacity: 0.8 }).addTo(layerGroup);
+                            } else {
+                                segmentsToFetch.push({ start, end, cacheKey, color });
+                            }
+                        }
+                    }
+                }
+                L.polyline(DRIVE_COURSE_COORDS, { color: '#06b6d4', weight: 6, opacity: 0.6 }).addTo(layerGroup);
+
+                const processRouteQueue = async () => {
+                    for (const segment of segmentsToFetch) {
+                        try {
+                            await new Promise(resolve => setTimeout(resolve, 1200));
+                            if (!layerGroup._map) break;
+                            const coords = await fetchRoute(segment.start, segment.end);
+                            routeCacheRef.current[segment.cacheKey] = coords; 
+                            if (coords && layerGroup._map) {
+                                L.polyline(coords, { color: segment.color, weight: 5, opacity: 0.8 }).addTo(layerGroup);
+                            }
+                        } catch (e) { console.warn("Queue processing warning", e); }
+                    }
+                };
+                if (segmentsToFetch.length > 0) { processRouteQueue(); }
+            };
+
+            useEffect(() => {
+                if (isLeafletLoaded && mapRef.current && !mapInstanceRef.current && window.L) { 
+                    const map = L.map(mapRef.current, { zoomControl: false, attributionControl: false }).setView([33.38, 126.55], 10); 
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map); 
+                    mapInstanceRef.current = map;
+                    routeLayerGroupRef.current = L.layerGroup().addTo(map);
+                }
+                if (mapInstanceRef.current && routeLayerGroupRef.current) {
+                    drawMapLayers(routeLayerGroupRef.current);
+                }
+            }, [isLeafletLoaded, scheduleData]);
+
+            useEffect(() => {
+                if (isMapPopupOpen && isLeafletLoaded && popupMapRef.current && window.L) {
+                    if (!popupMapInstanceRef.current) { 
+                        popupMapInstanceRef.current = L.map(popupMapRef.current).setView([33.38, 126.55], 10); 
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(popupMapInstanceRef.current); 
+                        popupLayerGroupRef.current = L.layerGroup().addTo(popupMapInstanceRef.current);
+                    }
+                    const map = popupMapInstanceRef.current; 
+                    setTimeout(() => map.invalidateSize(), 200);
+                    if (popupLayerGroupRef.current) { drawMapLayers(popupLayerGroupRef.current); }
+                    if (selectedPlace && selectedPlace.lat) { 
+                        map.setView([selectedPlace.lat, selectedPlace.lng], 14); 
+                        L.circleMarker([selectedPlace.lat, selectedPlace.lng], {
+                            radius: 10, fillColor: '#EF4444', color: 'white', weight: 2, fillOpacity: 0.9
+                        }).addTo(popupLayerGroupRef.current).bindPopup(`<b>${selectedPlace.title}</b>`).openPopup();
+                    }
+                }
+            }, [isMapPopupOpen, selectedPlace, scheduleData]);
+
+            const openMapPopup = (item) => { setSelectedPlace(item); setIsMapPopupOpen(true); };
+            const closeMapPopup = () => { setIsMapPopupOpen(false); setSelectedPlace(null); if (popupMapInstanceRef.current) { popupMapInstanceRef.current.remove(); popupMapInstanceRef.current = null; popupLayerGroupRef.current = null; } };
+            const locateUser = () => { if (!mapInstanceRef.current) return; const map = mapInstanceRef.current; map.locate({ setView: true, maxZoom: 14 }); map.on('locationfound', (e) => { L.circle(e.latlng, { radius: e.accuracy/2, color: 'blue', fillColor: '#3b82f6', fillOpacity: 0.2 }).addTo(routeLayerGroupRef.current); L.circleMarker(e.latlng, { radius: 6, color: 'white', fillColor: '#2563eb', fillOpacity: 1 }).addTo(routeLayerGroupRef.current).bindPopup("현재 위치").openPopup(); }); };
+            const locateUserInPopup = () => { if (!popupMapInstanceRef.current) return; const map = popupMapInstanceRef.current; map.locate({ setView: true, maxZoom: 14 }); };
+
+            const isWeatherBad = (dayIndex) => {
+                if (!weather || !weather.daily) return false;
+                const weatherCode = weather.daily.weather_code[dayIndex - 1];
+                return weatherCode > 50; 
+            };
+
+            const travelStyle = getTravelStyle();
+
+            return (
+                <div className="font-sans bg-slate-50 text-slate-700 min-h-screen pb-24 print:pb-0 print:bg-white">
+                    {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg(null)} />}
+                    
+                    {isResetMenuOpen && (
+                        <div className="fixed inset-0 z-[3000] bg-black/60 flex items-center justify-center p-4 animate-fadeIn" onClick={() => setIsResetMenuOpen(false)}>
+                            <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl space-y-3" onClick={e => e.stopPropagation()}>
+                                <h3 className="text-lg font-black text-slate-800 mb-2">초기화 옵션 선택</h3>
+                                <p className="text-sm text-slate-500 mb-4">어떤 데이터를 복구할까요?</p>
+                                
+                                <button onClick={() => handleSelectReset('all')} className="w-full p-4 bg-red-50 text-red-700 font-bold rounded-xl flex items-center gap-3 border border-red-100 hover:bg-red-100">
+                                    <Icon name="rotate-ccw" size={20}/> 모든 데이터 초기화 (Reset All)
+                                </button>
+                                <button onClick={() => handleSelectReset('day1')} className="w-full p-4 bg-slate-50 text-slate-700 font-bold rounded-xl flex items-center gap-3 border border-slate-100 hover:bg-slate-100">
+                                    <Icon name="calendar" size={20}/> 1일차 일정만 복구
+                                </button>
+                                <button onClick={() => handleSelectReset('day2')} className="w-full p-4 bg-slate-50 text-slate-700 font-bold rounded-xl flex items-center gap-3 border border-slate-100 hover:bg-slate-100">
+                                    <Icon name="calendar" size={20}/> 2일차 일정만 복구
+                                </button>
+				                <button onClick={() => handleSelectReset('place')} className="w-full p-4 bg-slate-50 text-slate-700 font-bold rounded-xl flex items-center gap-3 border border-slate-100 hover:bg-slate-100">
+                                    <Icon name="map-pin" size={20}/> 플레이스만 초기화
+                                </button>
+                                <button onClick={() => handleSelectReset('cost')} className="w-full p-4 bg-green-50 text-green-700 font-bold rounded-xl flex items-center gap-3 border border-green-100 hover:bg-green-100">
+                                    <Icon name="dollar-sign" size={20}/> 경비 내역만 초기화
+                                </button>
+                                
+                                <button onClick={() => setIsResetMenuOpen(false)} className="w-full mt-2 py-3 text-slate-400 font-bold text-sm">취소</button>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="fixed top-0 left-0 right-0 h-[35vh] z-0 shadow-lg no-print">
+                        <div ref={mapRef} className="w-full h-full bg-slate-200" />
+                        <div className="absolute top-0 left-0 w-full p-4 flex flex-col justify-between pointer-events-none z-[500] h-full">
+                            <div className="flex justify-between items-start">
+                                <div className="pointer-events-auto">
+                                    <span className="inline-block bg-amber-500 text-white text-xs font-black px-3 py-1 rounded-full shadow-md mb-1 animate-bounce">{getDDay()}</span>
+                                </div>
+                                <div className={`pointer-events-auto bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-white/50 text-right transition-all duration-300 relative overflow-hidden ${isWeatherVisible ? 'p-3 min-w-[140px]' : 'p-0 w-10 h-10 flex items-center justify-center'}`}>
+                                    <button 
+                                        onClick={() => setIsWeatherVisible(!isWeatherVisible)}
+                                        className={`${isWeatherVisible ? 'absolute top-2 left-2' : ''} text-slate-400 hover:text-teal-600 transition-colors z-10`}
+                                        title={isWeatherVisible ? "날씨 숨기기" : "날씨 보기"}
+                                    >
+                                        <Icon name={isWeatherVisible ? "eye-off" : "sun"} size={isWeatherVisible ? 14 : 20} className={!isWeatherVisible ? 'text-amber-500' : ''} />
+                                    </button>
+
+                                    {isWeatherVisible && (
+                                        weather && weather.current ? (
+                                            <div className="animate-fadeIn">
+                                                <div className="text-teal-700 font-black text-xl flex items-center justify-end gap-2 mb-1">
+                                                    {getWeatherIcon(weather.current.weather_code)} {Math.round(weather.current.temperature_2m)}°
+                                                </div>
+                                                <div className="text-[10px] font-bold text-slate-500 flex justify-end gap-2 border-b border-slate-200 pb-2 mb-2">
+                                                    <span className="flex items-center gap-1"><Icon name="droplets" size={10}/> {weather.current.relative_humidity_2m}%</span>
+                                                    <span className="flex items-center gap-1"><Icon name="wind" size={10}/> {weather.current.wind_speed_10m}m/s</span>
+                                                </div>
+                                                <div className="text-right text-xs text-slate-400">서귀포시 기준</div>
+                                                <div className="flex justify-between items-center border-b border-slate-200 pb-1 gap-3">
+                                                    <span className="text-[11px] font-bold text-slate-500">11.27(목)</span>
+                                                    <div className="flex items-center gap-1 text-xs font-bold text-slate-700">
+                                                        {getWeatherIcon(weather.daily.weather_code[0])}
+                                                        <span>{Math.round(weather.daily.temperature_2m_min[0])}°/{Math.round(weather.daily.temperature_2m_max[0])}°</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex justify-between items-center gap-3">
+                                                    <span className="text-[11px] font-bold text-slate-500">11.28(금)</span>
+                                                    <div className="flex items-center gap-1 text-xs font-bold text-slate-700">
+                                                        {getWeatherIcon(weather.daily.weather_code[1])}
+                                                        <span>{Math.round(weather.daily.temperature_2m_min[1])}°/{Math.round(weather.daily.temperature_2m_max[1])}°</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : <div className="text-xs text-slate-400 font-bold mt-6 text-center">로딩중...</div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex justify-end items-end gap-2 pointer-events-auto pb-4">
+                                <button onClick={locateUser} className="bg-white p-3 rounded-full shadow-lg text-slate-600 hover:text-blue-600 transition-colors border border-slate-100"><Icon name="crosshair" size={20} /></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="relative z-10 mt-[32vh] bg-slate-50 min-h-[70vh] rounded-t-[24px] shadow-[0_-5px_20px_rgba(0,0,0,0.1)] px-5 pt-6 pb-24 schedule-container print:mt-0 print:shadow-none print:bg-white">
+                        
+                        <div className="sticky top-0 z-[100] bg-white/95 backdrop-blur-lg p-4 rounded-2xl shadow-lg border border-teal-100 mb-6 -mx-1 no-print">
+                            <div className="flex justify-between items-end mb-2">
+                                <div>
+                                    <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500 mb-1">
+                                        <span className="bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full">Total</span>
+                                        <span>이동거리: {Math.round(scheduleData.reduce((acc, cur) => acc + (parseFloat(cur.dist) || 0), 0) * 100) / 100}km</span>
+                                        <span>•</span>
+                                        <span>장소: {scheduleData.filter(s => s.type === 'tour' || s.type === 'cafe' || s.type === 'meal').length}곳</span>
+                                    </div>
+                                    <div className="text-lg font-black text-slate-800 mt-1 truncate w-[200px]">
+                                        {activeScheduleItem ? `🚩 ${activeScheduleItem.title}` : "여행 준비 중..."}
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <span className="text-3xl font-black text-teal-600">{Math.round(tripProgress)}<span className="text-base text-teal-400">%</span></span>
+                                </div>
+                            </div>
+                            <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden shadow-inner relative">
+                                <div className="h-full rounded-full transition-all duration-500 ease-out progress-bar-animated relative" style={{ width: `${tripProgress}%` }}>
+                                    <div className="absolute right-0 top-0 bottom-0 w-1 bg-white/50 shadow-[0_0_10px_rgba(255,255,255,0.8)]"></div>
+                                </div>
+                            </div>
+                            <div className="flex justify-between mt-1 text-[10px] font-bold text-slate-400">
+                                <span>대전 출발</span>
+                                <span>집 도착</span>
+                            </div>
+                        </div>
+
+                        {activeTab === 'timeline' && (
+                            <div className="flex gap-2 mb-2 no-print">
+                                <div className="flex-1 bg-gradient-to-r from-indigo-500 to-purple-600 p-2 rounded-2xl shadow-lg flex justify-between items-center text-white cursor-pointer hover:scale-[1.02] transition-transform" onClick={exportToCalendar}>
+                                    <div>
+                                        <div className="text-[10px] font-medium opacity-80 mb-1">Calendar</div>
+                                        <div className="font-bold flex items-center gap-1 text-sm"><Icon name="calendar" size={16}/> 캘린더 내보내기</div>
+                                    </div>
+                                </div>
+                                <div className="flex-1 bg-gradient-to-r from-teal-500 to-emerald-600 p-2 rounded-2xl shadow-lg flex justify-between items-center text-white cursor-pointer hover:scale-[1.02] transition-transform" onClick={handlePrint}>
+                                    <div>
+                                        <div className="text-[10px] font-medium opacity-80 mb-1">Memory</div>
+                                        <div className="font-bold flex items-center gap-1 text-sm"><Icon name="printer" size={16}/> PDF/추억 저장</div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'timeline' && (
+                            <div className="space-y-8 animate-fadeIn">
+                                {[0, 1, 2].map(day => (
+                                    <div key={day} className="timeline-group">
+                                        <div className="sticky top-[105px] bg-slate-50/95 backdrop-blur-sm py-3 z-20 border-b-2 border-teal-600 flex justify-between items-end mb-4 print:static print:bg-white print:border-b-black">
+                                            <div>
+                                                <h2 className="text-lg font-black text-slate-800">{day === 0 ? 'Day 0 (준비)' : `Day ${day} ${day===1?'(서쪽)':'(동쪽)'}`}</h2>
+                                                <span className="text-xs font-bold text-slate-400">{day===1?'11.27(목)':(day===2?'11.28(금)':'11.26(수)')}</span>
+                                            </div>
+                                            {day > 0 && (
+                                                <div className="text-[10px] font-bold text-slate-500 text-right">
+                                                    <div>{Math.round(scheduleData.filter(s => s.day === day).reduce((acc, cur) => acc + (parseFloat(cur.dist) || 0), 0) * 100) / 100}km 이동</div>
+                                                    <div>{scheduleData.filter(s => s.day === day && (s.type === 'tour' || s.type === 'cafe')).length}곳 방문</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="space-y-0">
+                                            {scheduleData.filter(s => s.day === day).map((item, index, array) => {
+                                                const isActive = activeScheduleItem && activeScheduleItem.id === item.id;
+                                                const isStamped = visitedPlaces.includes(item.id);
+                                                const itemTime = getItemDate(item.day, item.time);
+                                                const nextItem = array[index + 1];
+                                                const nextItemTime = nextItem ? getItemDate(nextItem.day, nextItem.time) : (itemTime ? new Date(itemTime.getTime() + 60*60*1000) : null);
+                                                let lineStatus = 'future';
+                                                if (currentTime && nextItemTime) {
+                                                    if (currentTime >= nextItemTime) lineStatus = 'past';
+                                                    else if (currentTime >= itemTime && currentTime < nextItemTime) lineStatus = 'current';
+                                                }
+                                                const showWeatherAlert = (item.day > 0 && isWeatherBad(item.day) && (item.type === 'tour' || item.type === 'cafe'));
+
+                                                return (
+                                                <div key={item.id} id={`item-${item.id}`} className="timeline-item">
+                                                    {item.dist && item.dist !== '-' && (
+                                                        <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full w-fit mb-3 ml-14 border border-slate-200 no-print">
+                                                            <Icon name="car" size={12} className="text-slate-400" />
+                                                            <span>{item.dist}</span>
+                                                            <span className="text-slate-300">|</span>
+                                                            <span>{item.dur}</span>
+                                                        </div>
+                                                    )}
+                                                    
+                                                    <div className="flex w-full relative pb-6 last:pb-0 group cursor-pointer" onClick={() => openMapPopup(item)}>
+                                                        <div className="w-14 text-right pr-3 flex-shrink-0 pt-0.5 timeline-time">
+                                                            <span className={`text-sm font-black font-mono ${isActive ? 'text-red-500' : 'text-slate-700'}`}>{item.time}</span>
+                                                        </div>
+                                                        <div className="w-6 flex flex-col items-center relative timeline-line">
+                                                            <div className={`w-3.5 h-3.5 rounded-full border-[3px] z-10 bg-slate-200 border-white shadow-sm ring-1 ring-slate-200 group-hover:bg-teal-500 group-hover:ring-teal-500 transition-colors 
+                                                                ${item.isSpecial ? 'ring-purple-400 bg-purple-100' : ''} 
+                                                                ${isStamped ? 'bg-amber-400 ring-amber-400' : (isActive ? 'bg-red-500 ring-red-500 scale-125 shadow-[0_0_10px_rgba(239,68,68,0.6)]' : (lineStatus === 'past' ? (item.day === 2 ? 'bg-orange-500 ring-orange-500' : 'bg-teal-500 ring-teal-500') : ''))}`} />
+                                                            
+                                                            <div className={`w-1 flex-grow my-1 rounded-full transition-all duration-500
+                                                                ${lineStatus === 'past' ? (item.day === 2 ? 'bg-orange-500' : 'bg-teal-500') : 
+                                                                  lineStatus === 'current' ? (item.day === 2 ? 'bg-gradient-to-b from-orange-500 via-orange-300 to-slate-200' : 'bg-gradient-to-b from-teal-500 via-teal-300 to-slate-200') : 'bg-slate-200'}`} />
+                                                        </div>
+                                                        <div className="flex-1 pl-3 pb-2 timeline-content min-w-0">
+                                                            <div className={`bg-white border border-slate-200 rounded-2xl p-4 shadow-sm group-hover:shadow-md group-hover:border-teal-200 transition-all active:scale-98 relative overflow-hidden 
+                                                                ${item.isSpecial ? 'border-purple-200 bg-purple-50' : ''} 
+                                                                ${isActive ? 'active-card' : ''}
+                                                                ${isStamped ? 'stamped-card' : ''}`}>
+                                                                
+                                                                {isActive && <div className="absolute top-0 right-0 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg animate-pulse no-print">진행중</div>}
+                                                                {isStamped && <div className="absolute top-2 right-2 text-amber-500 stamp-mark opacity-30"><Icon name="award" size={48} strokeWidth={1.5} /></div>}
+                                                                {showWeatherAlert && !isStamped && <div className="absolute top-0 right-0 bg-blue-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg no-print z-10">☔ 우천 대비</div>}
+
+                                                                <div className="flex justify-between items-start mb-1">
+                                                                    <h3 className="font-black text-slate-800 flex items-center gap-2 truncate pr-12">
+                                                                        {item.title}
+                                                                        {item.isDrive && <span className="text-[10px] bg-cyan-100 text-cyan-700 px-1.5 py-0.5 rounded font-bold flex-shrink-0 ml-1 no-print">드라이브</span>}
+                                                                    </h3>
+                                                                    <div className="p-1.5 rounded-full bg-slate-100 text-slate-400 flex-shrink-0 no-print">{getTypeIcon(item.type)}</div>
+                                                                </div>
+                                                                <p className="text-sm text-slate-600 mb-2 leading-relaxed line-clamp-2">{item.desc}</p>
+                                                                
+                                                                {item.detail && <div className="bg-blue-50 border-l-2 border-blue-500 p-2 rounded-r-lg text-xs text-blue-800 leading-relaxed mt-2"><span className="font-bold mr-1">Tip:</span>{item.detail}</div>}
+                                                                
+                                                                {item.type === 'flight' && item.flightNum && (
+                                                                    <button onClick={(e) => { e.stopPropagation(); openFlightSearch(item.flightNum); }} className="w-full mt-3 bg-sky-100 text-sky-700 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-sky-200 no-print"><Icon name="plane" size={14}/> {item.flightNum} 실시간 운항정보 확인</button>
+                                                                )}
+
+                                                                {(item.type === 'meal' || item.type === 'cafe' || item.type === 'tour') && (
+                                                                    <div className="mt-3 pt-3 border-t border-slate-100">
+                                                                        <input 
+                                                                            type="file" 
+                                                                            accept="image/*" 
+                                                                            className="hidden" 
+                                                                            ref={el => fileInputRefs.current[item.id] = el}
+                                                                            onChange={(e) => handlePhotoUpload(e, item.id)}
+                                                                        />
+                                                                        <div className="flex gap-2 items-center overflow-x-auto no-scrollbar pb-1 no-print">
+                                                                            <button onClick={(e) => { e.stopPropagation(); fileInputRefs.current[item.id].click(); }} className="flex-shrink-0 flex items-center gap-1 bg-slate-50 text-slate-500 border border-slate-200 text-[10px] px-2 py-1.5 rounded hover:bg-slate-100 transition-colors">
+                                                                                <Icon name="camera" size={12} /> {photoLogs[item.id] ? '사진 변경' : '사진 추가'}
+                                                                            </button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); shareLocation(item); }} className="flex-shrink-0 flex items-center gap-1 bg-yellow-50 text-yellow-700 border border-yellow-200 text-[10px] px-2 py-1.5 rounded hover:bg-yellow-100">
+                                                                                <Icon name="share-2" size={12} /> 카톡 공유
+                                                                            </button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); openNearbySearch('', '편의점'); }} className="flex-shrink-0 flex items-center gap-1 bg-blue-50 text-blue-600 border border-blue-100 text-[10px] px-2 py-1.5 rounded hover:bg-blue-100">
+                                                                                <Icon name="store" size={12} /> 편의점
+                                                                            </button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); openNearbySearch('', '주유소'); }} className="flex-shrink-0 flex items-center gap-1 bg-green-50 text-green-600 border border-green-100 text-[10px] px-2 py-1.5 rounded hover:bg-green-100">
+                                                                                <Icon name="fuel" size={12} /> 주유소
+                                                                            </button>
+                                                                        </div>
+                                                                        
+                                                                        {photoLogs[item.id] && (
+                                                                            <div className="mt-2 relative group/img">
+                                                                                <img src={photoLogs[item.id]} alt="Travel Log" className="w-full h-40 object-cover rounded-lg shadow-sm" />
+                                                                                <div className="absolute bottom-1 right-1 bg-black/50 text-white text-[10px] px-2 py-1 rounded-full backdrop-blur-sm no-print">My Memory</div>
+                                                                                <button 
+                                                                                    onClick={(e) => handlePhotoDelete(e, item.id)}
+                                                                                    className="absolute top-2 right-2 bg-red-500/90 text-white p-1.5 rounded-full shadow-md hover:bg-red-600 transition-colors no-print"
+                                                                                    title="사진 삭제"
+                                                                                >
+                                                                                    <Icon name="trash-2" size={14} />
+                                                                                </button>
+                                                                            </div>
+                                                                        )}
+
+                                                                        <textarea 
+                                                                            className="w-full mt-2 p-2 text-sm bg-amber-50/50 border border-amber-100 rounded-lg focus:ring-2 focus:ring-amber-200 focus:border-amber-300 outline-none placeholder-slate-400 transition-all print:bg-white print:border-none print:p-0"
+                                                                            rows={photoLogs[item.id] ? 2 : 1}
+                                                                            placeholder="이곳에 여행 메모를 남겨보세요"
+                                                                            value={memoState[item.id] || ''}
+                                                                            onChange={(e) => handleMemoChange(item.id, e.target.value)}
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                        />
+                                                                    </div>
+                                                                )}
+
+                                                                {item.alternatives && (
+                                                                    <div className="mt-3 space-y-2 no-print">
+                                                                        {item.alternatives.map((alt, idx) => (
+                                                                            <div key={idx} className="bg-slate-50 p-3 rounded-xl border border-slate-200 hover:bg-slate-100 transition-colors" onClick={(e) => { e.stopPropagation(); openNavi(alt.navi); }}>
+                                                                                <div className="flex items-center gap-2 text-xs font-black text-slate-700 mb-1"><Icon name="corner-down-right" size={12} className="text-amber-500" /> {alt.name}</div>
+                                                                                <div className="text-xs text-slate-500 pl-5">{alt.desc}</div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                                <div className="flex gap-2 mt-3 flex-wrap no-print">
+                                                                    {item.navi && <button onClick={(e) => { e.stopPropagation(); openNavi(item.navi); }} className="flex items-center gap-1 bg-teal-700 text-white text-xs px-3 py-2 rounded-lg font-bold shadow-sm active:bg-teal-800 hover:bg-teal-600 whitespace-nowrap"><Icon name="navigation" size={12} /> 길찾기</button>}
+                                                                    {item.lat && <button onClick={(e) => { e.stopPropagation(); openMapPopup(item); }} className="flex items-center gap-1 bg-slate-100 text-slate-600 text-xs px-3 py-2 rounded-lg font-bold shadow-sm hover:bg-slate-200 whitespace-nowrap"><Icon name="map" size={12} /> 지도</button>}
+                                                                    {item.day > 0 && (
+                                                                        <button onClick={(e) => toggleStamp(e, item.id)} className={`flex items-center gap-1 text-xs px-3 py-2 rounded-lg font-bold shadow-sm transition-colors whitespace-nowrap ${isStamped ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                                                                            <Icon name={isStamped ? "check-circle" : "circle"} size={12} /> {isStamped ? "완료" : "인증"}
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )})}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {activeTab === 'places' && (
+                            <div className="space-y-4 animate-fadeIn">
+                                {placesData.map((place, idx) => (
+                                    <div key={idx} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                        <div className="flex justify-between items-start mb-3">
+                                            <div>
+                                                <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded mb-1 ${place.type === 'meal' ? 'bg-orange-100 text-orange-700' : (place.type === 'cafe' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700')}`}>{place.type === 'meal' ? '맛집' : (place.type === 'cafe' ? '카페' : '관광지')}</span>
+                                                <h3 className="text-lg font-black text-slate-800">{place.name}</h3>
+                                            </div>
+                                            <button onClick={() => openNavi(place.name)} className="text-slate-400 hover:text-teal-600"><Icon name="navigation" size={20} /></button>
+                                        </div>
+                                        <div className="text-sm mb-3"><span className="font-bold text-teal-700">★ 대표메뉴:</span> {place.main}</div>
+                                        <p className="text-sm text-slate-600 mb-4 bg-slate-50 p-3 rounded-lg leading-relaxed">{place.desc}</p>
+                                        <div>
+                                            <div className="text-xs font-bold text-amber-600 mb-2 flex items-center gap-1"><Icon name="info" size={12} /> 전문가 Tip</div>
+                                            <ul className="space-y-1">{place.tips.map((tip, i) => (<li key={i} className="text-xs text-slate-500 pl-3 relative before:content-['•'] before:absolute before:left-0 before:text-slate-300">{tip}</li>))}</ul>
+                                        </div>
+                                        <div className="flex gap-2 mt-4">
+                                            <a href={`https://search.naver.com/search.naver?where=blog&query=${encodeURIComponent("제주 "+place.name+" 솔직후기")}`} target="_blank" className="flex-1 py-3 rounded-xl border border-slate-200 flex items-center justify-center gap-2 text-sm font-bold text-slate-600 bg-white hover:bg-slate-50"><Icon name="search" size={16} /> 솔직 후기</a>
+                                            <a href={`https://m.search.naver.com/search.naver?query=${encodeURIComponent("제주 "+place.name)}`} target="_blank" className="flex-1 py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-white bg-green-500 hover:bg-green-600 shadow-sm"><Icon name="book-open" size={16} />정보</a>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {activeTab === 'tips' && (
+                            <div className="space-y-4 animate-fadeIn">
+                                {/* [신규 기능] 여행 스타일 분석 카드 */}
+                                <div className={`border border-slate-100 rounded-2xl p-5 shadow-sm mb-4 ${travelStyle.bg}`}>
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <div className="bg-white p-2 rounded-full shadow-sm"><Icon name={travelStyle.icon} size={20} className={travelStyle.color}/></div>
+                                        <div>
+                                            <div className="text-xs font-bold text-slate-500 mb-0.5">나의 여행 DNA 분석</div>
+                                            <div className="text-lg font-black text-slate-800">{travelStyle.title}</div>
+                                        </div>
+                                    </div>
+                                    <p className="text-sm text-slate-600 pl-2 border-l-2 border-white/50">{travelStyle.desc}</p>
+                                </div>
+
+                                {GUIDES.map((g, i) => (
+                                    <div key={i} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                                        <div className="p-4 bg-white flex items-center gap-3">
+                                            <div className={`${g.color} opacity-80`}><Icon name={g.icon} size={20}/></div>
+                                            <span className="font-black text-slate-800 text-sm">{g.title}</span>
+                                        </div>
+                                        <div className="px-4 pb-4 bg-slate-50 border-t border-slate-100 text-sm text-slate-600 leading-relaxed">
+                                            <ul className="space-y-2 mt-3">{g.content.map((line, k) => <li key={k} className="pl-3 relative before:content-['•'] before:absolute before:left-0 before:text-teal-500 before:font-bold">{line}</li>)}</ul>
+                                            {g.id === 'g0' && (
+                                                <div className="mt-3 grid grid-cols-2 gap-2">
+                                                    <button onClick={()=>openNearbySearch("", "응급실")} className="bg-red-50 text-red-600 py-2 rounded font-bold text-xs hover:bg-red-100">🏥 가까운 응급실 찾기</button>
+                                                    <button onClick={()=>openNearbySearch("", "주유소")} className="bg-green-50 text-green-600 py-2 rounded font-bold text-xs hover:bg-green-100">⛽ 주변 주유소 찾기</button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {activeTab === 'cost' && (
+                            <div className="space-y-6 animate-fadeIn">
+                                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                    <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><Icon name="pie-chart" size={20} className="text-teal-600"/> 지출 분석</h3>
+                                    <div className="flex items-center justify-center gap-6">
+                                        <div className="relative w-32 h-32 rounded-full flex items-center justify-center shadow-inner" style={{ background: `conic-gradient(#3b82f6 0deg ${c1Deg}deg, #f97316 ${c1Deg}deg ${c1Deg + c2Deg}deg, #22c55e ${c1Deg + c2Deg}deg 360deg)` }}>
+                                            <div className="absolute inset-2 bg-white rounded-full flex flex-col items-center justify-center">
+                                                <span className="text-xs text-slate-400 font-bold">지출율</span>
+                                                <span className="text-xl font-black text-slate-800">{spentPercent}%</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2 text-xs font-bold text-slate-600">
+                                            <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-blue-500"></span>교통/숙박 ({Math.round(costSummary.totalSpent ? (costSummary.c1/costSummary.totalSpent)*100 : 0)}%)</div>
+                                            <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-orange-500"></span>식비 ({Math.round(costSummary.totalSpent ? (costSummary.c2/costSummary.totalSpent)*100 : 0)}%)</div>
+                                            <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-green-500"></span>쇼핑/기타 ({Math.round(costSummary.totalSpent ? (costSummary.c3/costSummary.totalSpent)*100 : 0)}%)</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-r from-slate-700 to-slate-800 rounded-2xl p-5 shadow-md text-white">
+                                    <h3 className="text-sm font-bold mb-3 flex items-center gap-2 text-slate-200"><Icon name="database" size={16} /> 데이터 안전 보관함</h3>
+                                    <div className="flex gap-2">
+                                        <button onClick={backupData} className="flex-1 bg-white/10 hover:bg-white/20 transition-colors border border-white/20 py-3 rounded-xl flex flex-col items-center justify-center gap-1">
+                                            <Icon name="download" size={20} className="text-teal-300"/>
+                                            <span className="text-xs font-bold">백업 파일 저장</span>
+                                        </button>
+                                        <div className="flex-1 relative">
+                                            <input type="file" ref={restoreInputRef} onChange={restoreData} accept=".json" className="hidden" />
+                                            <button onClick={() => restoreInputRef.current.click()} className="w-full h-full bg-white/10 hover:bg-white/20 transition-colors border border-white/20 py-3 rounded-xl flex flex-col items-center justify-center gap-1">
+                                                <Icon name="upload" size={20} className="text-orange-300"/>
+                                                <span className="text-xs font-bold">데이터 불러오기</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                    <h3 className="text-lg font-black text-indigo-800 mb-4 flex items-center gap-2"><Icon name="check-square" size={20} /> 여행 준비물 체크리스트</h3>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {CHECKLIST.map((item, idx) => (
+                                            <div key={idx} onClick={() => toggleChecklist(item)} className={`flex items-center gap-2 p-3 rounded-xl cursor-pointer transition-colors ${checklistState[item] ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-50 text-slate-500'}`}>
+                                                <Icon name={checklistState[item] ? "check-square" : "square"} size={18} className={checklistState[item] ? "text-indigo-600" : "text-slate-300"} />
+                                                <span className={`text-xs font-bold ${checklistState[item] ? 'line-through opacity-70' : ''}`}>{item}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                    <h3 className="text-lg font-black text-teal-800 mb-4 flex items-center gap-2"><Icon name="dollar-sign" size={20} /> 실시간 여행 가계부</h3>
+                                    {costData.map((group, idx) => {
+                                        const subTotal = group.items.reduce((sum, item) => sum + item.v, 0);
+                                        const perPerson = Math.round(subTotal / 3);
+                                        const borderClass = idx === 0 ? 'border-l-4 border-l-blue-500' : (idx === 1 ? 'border-l-4 border-l-orange-500' : 'border-l-4 border-l-green-500');
+                                        const titleColor = idx === 0 ? 'text-blue-600' : (idx === 1 ? 'text-orange-600' : 'text-green-600');
+
+                                        return (
+                                        <div key={idx} className={`mb-5 last:mb-0 bg-slate-50/50 p-4 rounded-xl shadow-sm ${borderClass}`}>
+                                            <div className={`text-xs font-black ${titleColor} mb-3 uppercase tracking-wider border-b border-slate-200 pb-2 flex justify-between items-center`}>
+                                                <span>{group.cat}</span>
+                                                <span className="bg-white px-2 py-0.5 rounded shadow-sm text-[10px] text-slate-400">3인 기준</span>
+                                            </div>
+                                            <div className="space-y-3">
+                                                {group.items.map((item, i) => {
+                                                    const spent = actualCosts[item.id] || 0;
+                                                    const diff = item.v - spent;
+                                                    return (
+                                                    <div key={i} className="bg-white p-2 rounded-lg border border-slate-100">
+                                                        <div className="flex justify-between text-sm text-slate-600 mb-1">
+                                                            <span className="font-bold">{item.n}</span>
+                                                            <span className="text-xs text-slate-400">예산: {formatCost(item.v)}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <input type="text" placeholder="실제 지출 입력" 
+                                                                className="flex-1 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-sm text-right font-bold focus:border-teal-500 outline-none"
+                                                                value={actualCosts[item.id] || ''}
+                                                                onChange={(e) => handleCostChange(item.id, e.target.value)}
+                                                            />
+                                                            <span className="text-xs font-bold w-16 text-right">
+                                                                {spent > 0 ? (diff >= 0 ? <span className="text-blue-600">+{formatCost(diff)}</span> : <span className="text-red-500">{formatCost(diff)}</span>) : '-'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                )})}
+                                            </div>
+                                            <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between items-end">
+                                                <span className="text-xs font-bold text-slate-500">카테고리 소계</span>
+                                                <div className="text-right">
+                                                    <span className="block text-sm font-black text-slate-700">{formatCost(subTotal)}원</span>
+                                                    <span className="text-[10px] font-bold text-slate-400 bg-white px-1 rounded border border-slate-100">1인당 {formatCost(perPerson)}원</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )})}
+                                    
+                                    <div className="bg-teal-50 p-4 rounded-xl mt-4 border border-teal-100">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="font-bold text-teal-800">총 예산 합계</span>
+                                            <span className="font-black text-teal-700 text-lg">{formatCost(costData.reduce((acc, grp) => acc + grp.items.reduce((s, i) => s + i.v, 0), 0))}원</span>
+                                        </div>
+                                        <div className="flex justify-between items-center mb-2 border-t border-teal-200 pt-2">
+                                            <span className="font-bold text-red-600">현재 총 지출</span>
+                                            <div className="text-right">
+                                                <span className="block font-black text-red-600">{formatCost(Object.values(actualCosts).reduce((a, b) => a + b, 0))}원</span>
+                                                <span className="text-[10px] text-red-400 font-bold">(1인당: {formatCost(Math.round(Object.values(actualCosts).reduce((a, b) => a + b, 0) / 3))}원)</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="fixed bottom-24 right-5 flex flex-col gap-3 items-end z-50 no-print">
+                        {isMusicMenuOpen && (
+                            <div className="bg-white rounded-xl shadow-xl p-2 border border-slate-100 flex flex-col gap-2 animate-fadeIn mb-2 w-48">
+                                <div className="text-xs font-bold text-slate-400 px-2 py-1">제주 드라이브 BGM 🎵</div>
+                                {MUSIC_LINKS.map((m, i) => (
+                                    <a key={i} href={m.url} target="_blank" className="block text-sm font-bold text-slate-700 hover:bg-teal-50 px-3 py-2 rounded-lg transition-colors">
+                                        {m.name}
+                                    </a>
+                                ))}
+                            </div>
+                        )}
+                        <div className="relative">
+                            <span className="absolute right-full top-1/2 -translate-y-1/2 mr-3 bg-slate-800 text-white text-[10px] font-bold px-2 py-1 rounded-md opacity-0 hover:opacity-100 transition-opacity whitespace-nowrap">드라이브 BGM</span>
+                            <button onClick={() => setIsMusicMenuOpen(!isMusicMenuOpen)} className="bg-white text-pink-500 p-3 rounded-full shadow-lg hover:scale-105 transition-transform border border-pink-100">
+                                <Icon name="music" size={24} />
+                            </button>
+                        </div>
+                    </div>
+
+                    <button onClick={() => setIsChatOpen(true)} className="fixed bottom-20 right-5 bg-gradient-to-r from-teal-500 to-emerald-600 text-white p-4 rounded-full shadow-2xl z-50 hover:scale-105 transition-transform flex items-center justify-center border-4 border-white no-print"><Icon name="message-circle" size={28} fill="white" /></button>
+
+                    {isChatOpen && <ChatWidget onClose={() => setIsChatOpen(false)} schedule={scheduleData} places={placesData} costs={costData} onUpdateSchedule={handleUpdateSchedule} onResetSchedule={handleResetSchedule} currentTime={currentTime} />}
+
+                    {isMapPopupOpen && selectedPlace && (
+                        <div className="fixed inset-0 z-[1000] bg-black/60 flex items-center justify-center p-4 no-print" onClick={closeMapPopup}>
+                            <div className="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl" onClick={e=>e.stopPropagation()}>
+                                <div className="relative h-[400px]">
+                                    <div ref={popupMapRef} className="w-full h-full bg-slate-100"></div>
+                                    <button onClick={closeMapPopup} className="absolute top-3 right-3 bg-white p-2 rounded-full shadow-md z-[1001]"><Icon name="x" size={20}/></button>
+                                    <button onClick={locateUserInPopup} className="absolute bottom-3 right-3 bg-white p-3 rounded-full shadow-lg z-[1001] text-slate-600 border border-slate-100"><Icon name="crosshair" size={20}/></button>
+                                </div>
+                                <div className="p-5">
+                                    <h3 className="font-black text-lg mb-1">{selectedPlace.title}</h3>
+                                    <p className="text-sm text-slate-600 mb-4">{selectedPlace.desc}</p>
+                                    <button onClick={()=>openNavi(selectedPlace.navi)} className="w-full bg-teal-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2"><Icon name="navigation" size={18}/> 길찾기 시작</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="fixed bottom-0 left-0 w-full bg-white/95 backdrop-blur-lg border-t border-slate-200 pb-6 pt-2 px-6 flex justify-between items-center z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] no-print">
+                        <NavBtn active={activeTab === 'timeline'} onClick={() => setActiveTab('timeline')} icon="clock" label="타임라인" />
+                        <NavBtn active={activeTab === 'places'} onClick={() => setActiveTab('places')} icon="map-pin" label="플레이스" />
+                        <NavBtn active={activeTab === 'tips'} onClick={() => setActiveTab('tips')} icon="info" label="꿀팁백과" />
+                        <NavBtn active={activeTab === 'cost'} onClick={() => setActiveTab('cost')} icon="dollar-sign" label="경비/체크" />
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
